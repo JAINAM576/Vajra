@@ -1,3 +1,7 @@
 node_modules/
 .env
 *.log
+
+
+backend_change_shopkeer.md
+backend_changes_superadmin.md

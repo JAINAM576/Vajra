@@ -9,9 +9,17 @@
 
 const express = require('express');
 const router = express.Router();
+const cloudinary = require('cloudinary').v2;
 
 const Config = require('../models/SystemConfig');
 const { authenticate, authorizeAdmin } = require('../middleware/auth');
+
+// Configure Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
 /**
  * Helper: Get or create the singleton platform config document.
@@ -209,6 +217,78 @@ router.put('/qr', async (req, res) => {
       success: false,
       message: 'Server error updating QR URL.',
       data: {},
+    });
+  }
+});
+
+// ─── PUT /device-owner-qr — Update device owner QR URL (admin only) ───
+router.put('/device-owner-qr', async (req, res) => {
+  try {
+    const { deviceOwnerQrUrl } = req.body;
+
+    if (!deviceOwnerQrUrl) {
+      return res.status(400).json({
+        success: false,
+        message: 'deviceOwnerQrUrl is required.',
+        data: {},
+      });
+    }
+
+    const config = await Config.findOneAndUpdate(
+      { configKey: 'platform' },
+      {
+        $set: {
+          deviceOwnerQrUrl,
+          updatedBy: req.user.id,
+        },
+      },
+      { new: true, upsert: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Device Owner QR URL updated successfully.',
+      data: { deviceOwnerQrUrl: config.deviceOwnerQrUrl },
+    });
+  } catch (error) {
+    console.error('Update Device Owner QR error:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error updating device owner QR URL.',
+      data: {},
+    });
+  }
+});
+
+// ─── POST /upload — Upload base64 image (admin only) ───────────────────
+router.post('/upload', async (req, res) => {
+  try {
+    const { image } = req.body; // base64 string
+
+    if (!image) {
+      return res.status(400).json({
+        success: false,
+        message: 'Base64 image string is required.',
+      });
+    }
+
+    // Upload to Cloudinary
+    const uploadResponse = await cloudinary.uploader.upload(image, {
+      folder: 'lockapp_uploads',
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Image uploaded successfully.',
+      data: {
+        url: uploadResponse.secure_url,
+      },
+    });
+  } catch (error) {
+    console.error('Image upload error:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error uploading image.',
     });
   }
 });
