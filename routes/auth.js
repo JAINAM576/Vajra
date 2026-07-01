@@ -9,6 +9,7 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 
 const Admin = require('../models/Admin');
 const Shopkeeper = require('../models/Shopkeeper');
@@ -171,8 +172,7 @@ router.post('/shopkeeper/register', async (req, res) => {
     const token = signToken({ id: shopkeeper._id, role: 'shopkeeper' });
 
     // Remove password from response
-    const shopkeeperObj = shopkeeper.toObject();
-    delete shopkeeperObj.password;
+    const shopkeeperObj = shopkeeper.toJSON();
 
     return res.status(201).json({
       success: true,
@@ -255,8 +255,7 @@ router.post('/shopkeeper/login', async (req, res) => {
     const token = signToken({ id: shopkeeper._id, role: 'shopkeeper' });
 
     // Remove password from response
-    const shopkeeperObj = shopkeeper.toObject();
-    delete shopkeeperObj.password;
+    const shopkeeperObj = shopkeeper.toJSON();
 
     return res.status(200).json({
       success: true,
@@ -271,6 +270,179 @@ router.post('/shopkeeper/login', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Server error during login.',
+      data: {},
+    });
+  }
+});
+
+// ─── POST /shopkeeper/forgot-password ────────────────────────────────
+router.post('/shopkeeper/forgot-password', async (req, res) => {
+  try {
+    const { mobileNo, gmail } = req.body;
+
+    if (!mobileNo && !gmail) {
+      return res.status(400).json({
+        success: false,
+        message: 'Mobile number or Gmail is required.',
+        data: {},
+      });
+    }
+
+    const query = { isDeleted: { $ne: true } };
+    if (mobileNo) {
+      query.mobileNo = mobileNo;
+    } else {
+      query.gmail = gmail;
+    }
+
+    const shopkeeper = await Shopkeeper.findOne(query);
+    if (!shopkeeper) {
+      return res.status(404).json({
+        success: false,
+        message: 'Shopkeeper not found.',
+        data: {},
+      });
+    }
+
+    // Check rate limit: 1 minute
+    if (shopkeeper.resetPasswordOtpSentAt && Date.now() - shopkeeper.resetPasswordOtpSentAt < 60 * 1000) {
+      return res.status(429).json({
+        success: false,
+        message: 'Please wait 1 minute before requesting another OTP.',
+        data: {},
+      });
+    }
+
+    // Generate random 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Hash it using SHA256
+    const hashedOtp = crypto.createHash('sha256').update(otp).digest('hex');
+
+    shopkeeper.resetPasswordOtp = hashedOtp;
+    shopkeeper.resetPasswordOtpExpires = Date.now() + 10 * 60 * 1000; // 10 mins
+    shopkeeper.resetPasswordOtpSentAt = Date.now();
+    await shopkeeper.save();
+
+    // Send the email (mock or real if SMTP config is present)
+    console.log(`[OTP DEBUG] Generated OTP for shopkeeper ${shopkeeper.shopkeeperName}: ${otp}`);
+    
+    if (shopkeeper.gmail) {
+      // Mock / dynamic email sending
+      if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+        try {
+          const nodemailer = require('nodemailer');
+          const transporter = nodemailer.createTransport({
+            host: process.env.SMTP_HOST,
+            port: process.env.SMTP_PORT || 587,
+            secure: process.env.SMTP_SECURE === 'true',
+            auth: {
+              user: process.env.SMTP_USER,
+              pass: process.env.SMTP_PASS,
+            },
+          });
+          
+          await transporter.sendMail({
+            from: process.env.SMTP_FROM || '"Vajra Support" <noreply@vajra.com>',
+            to: shopkeeper.gmail,
+            subject: 'Vajra Password Reset OTP',
+            text: `Your OTP for resetting password is: ${otp}. Valid for 10 minutes.`,
+            html: `<p>Your OTP for resetting password is: <strong>${otp}</strong>. Valid for 10 minutes.</p>`,
+          });
+          console.log(`[OTP EMAIL] Sent OTP successfully to ${shopkeeper.gmail}`);
+        } catch (mailErr) {
+          console.error('[OTP EMAIL] SMTP Mailer Error:', mailErr.message);
+        }
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'OTP sent successfully to registered email if exists.',
+      data: {},
+    });
+  } catch (error) {
+    console.error('Shopkeeper forgot password error:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error generating OTP.',
+      data: {},
+    });
+  }
+});
+
+// ─── POST /shopkeeper/reset-password ─────────────────────────────────
+router.post('/shopkeeper/reset-password', async (req, res) => {
+  try {
+    const { mobileNo, gmail, otp, newPassword } = req.body;
+
+    if ((!mobileNo && !gmail) || !otp || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Identifier (mobileNo or gmail), OTP, and newPassword are required.',
+        data: {},
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password must be at least 6 characters.',
+        data: {},
+      });
+    }
+
+    const query = { isDeleted: { $ne: true } };
+    if (mobileNo) {
+      query.mobileNo = mobileNo;
+    } else {
+      query.gmail = gmail;
+    }
+
+    const shopkeeper = await Shopkeeper.findOne(query);
+    if (!shopkeeper) {
+      return res.status(404).json({
+        success: false,
+        message: 'Shopkeeper not found.',
+        data: {},
+      });
+    }
+
+    // Verify OTP exists and has not expired
+    if (!shopkeeper.resetPasswordOtp || !shopkeeper.resetPasswordOtpExpires || shopkeeper.resetPasswordOtpExpires < Date.now()) {
+      return res.status(400).json({
+        success: false,
+        message: 'OTP has expired or is invalid.',
+        data: {},
+      });
+    }
+
+    // Verify OTP match
+    const hashedOtp = crypto.createHash('sha256').update(otp).digest('hex');
+    if (shopkeeper.resetPasswordOtp !== hashedOtp) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid OTP.',
+        data: {},
+      });
+    }
+
+    // Update password (triggers hashing in pre-save hook) and clear OTP fields
+    shopkeeper.password = newPassword;
+    shopkeeper.resetPasswordOtp = undefined;
+    shopkeeper.resetPasswordOtpExpires = undefined;
+    await shopkeeper.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Password reset successful. You can now login.',
+      data: {},
+    });
+  } catch (error) {
+    console.error('Shopkeeper reset password error:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error resetting password.',
       data: {},
     });
   }

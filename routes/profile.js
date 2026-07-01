@@ -193,4 +193,63 @@ router.put('/notifications', async (req, res) => {
   }
 });
 
+// ─── PUT /password — Update password (shopkeeper only) ────────────────
+router.put('/password', async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'currentPassword and newPassword are required.',
+        data: {},
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'New password must be at least 6 characters.',
+        data: {},
+      });
+    }
+
+    const shopkeeper = await Shopkeeper.findById(req.user.id);
+    if (!shopkeeper) {
+      return res.status(404).json({
+        success: false,
+        message: 'Shopkeeper not found.',
+        data: {},
+      });
+    }
+
+    // Compare password
+    const isMatch = await shopkeeper.comparePassword(currentPassword);
+    if (!isMatch) {
+      return res.status(400).json({
+        success: false,
+        message: 'Incorrect current password.',
+        data: {},
+      });
+    }
+
+    // Update password (triggers mongoose pre('save') hook)
+    shopkeeper.password = newPassword;
+    await shopkeeper.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Password updated successfully.',
+      data: {},
+    });
+  } catch (error) {
+    console.error('Update password error:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error updating password.',
+      data: {},
+    });
+  }
+});
+
 module.exports = router;

@@ -44,9 +44,7 @@ router.get('/', async (req, res) => {
     }
 
     const shopkeepers = await Shopkeeper.find(filter)
-      .select('-password')
-      .sort({ createdAt: -1 })
-      .lean();
+      .sort({ createdAt: -1 });
 
     // Attach virtual counts for devices and keys
     const enriched = await Promise.all(
@@ -55,7 +53,7 @@ router.get('/', async (req, res) => {
           Device.countDocuments({ shopkeeperId: sk._id, isDeleted: { $ne: true } }),
           ActivationKey.countDocuments({ shopkeeperId: sk._id }),
         ]);
-        return { ...sk, deviceCount, keyCount };
+        return { ...sk.toJSON(), deviceCount, keyCount };
       })
     );
 
@@ -77,9 +75,7 @@ router.get('/', async (req, res) => {
 // ─── GET /:id — Get single shopkeeper ────────────────────────────────
 router.get('/:id', async (req, res) => {
   try {
-    const shopkeeper = await Shopkeeper.findById(req.params.id)
-      .select('-password')
-      .lean();
+    const shopkeeper = await Shopkeeper.findById(req.params.id);
 
     if (!shopkeeper || shopkeeper.isDeleted) {
       return res.status(404).json({
@@ -97,7 +93,7 @@ router.get('/:id', async (req, res) => {
     return res.status(200).json({
       success: true,
       message: 'Shopkeeper retrieved successfully.',
-      data: { shopkeeper: { ...shopkeeper, deviceCount } },
+      data: { shopkeeper: { ...shopkeeper.toJSON(), deviceCount } },
     });
   } catch (error) {
     console.error('Get shopkeeper error:', error.message);

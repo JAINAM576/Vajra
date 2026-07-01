@@ -29,6 +29,10 @@ const systemConfigSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    deviceOwnerQrUrl: {
+      type: String,
+      default: '',
+    },
     upiId: {
       type: String,
       default: '',
