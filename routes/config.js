@@ -9,6 +9,13 @@
 
 const express = require('express');
 const router = express.Router();
+const cloudinary = require('cloudinary').v2;
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
 const Config = require('../models/SystemConfig');
 const { authenticate, authorizeAdmin } = require('../middleware/auth');
@@ -55,6 +62,8 @@ router.put('/', async (req, res) => {
       'upiId',
       'maintenanceMode',
       'minAppVersion',
+      'deviceOwnerQrUrl',
+      'paymentQrUrl',
     ];
     const updates = {};
 
@@ -208,6 +217,79 @@ router.put('/qr', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Server error updating QR URL.',
+      data: {},
+    });
+  }
+});
+
+// ─── POST /upload — Upload base64 image to Cloudinary ────────────────
+router.post('/upload', async (req, res) => {
+  try {
+    const { image, folder } = req.body;
+
+    if (!image) {
+      return res.status(400).json({
+        success: false,
+        message: 'Base64 image string is required.',
+        data: {},
+      });
+    }
+
+    // Upload to Cloudinary (direct base64 support)
+    const uploadResponse = await cloudinary.uploader.upload(image, {
+      folder: folder || 'lockapp_assets',
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Image uploaded to Cloudinary successfully.',
+      data: { url: uploadResponse.secure_url },
+    });
+  } catch (error) {
+    console.error('Cloudinary upload error:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to upload image to Cloudinary.',
+      error: error.message,
+      data: {},
+    });
+  }
+});
+
+// ─── PUT /device-owner-qr — Update device owner app download QR URL ────
+router.put('/device-owner-qr', async (req, res) => {
+  try {
+    const { deviceOwnerQrUrl } = req.body;
+
+    if (!deviceOwnerQrUrl) {
+      return res.status(400).json({
+        success: false,
+        message: 'deviceOwnerQrUrl is required.',
+        data: {},
+      });
+    }
+
+    const config = await Config.findOneAndUpdate(
+      { configKey: 'platform' },
+      {
+        $set: {
+          deviceOwnerQrUrl,
+          updatedBy: req.user.id,
+        },
+      },
+      { new: true, upsert: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Device owner QR URL updated successfully.',
+      data: { deviceOwnerQrUrl: config.deviceOwnerQrUrl },
+    });
+  } catch (error) {
+    console.error('Update device owner QR error:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error updating device owner QR URL.',
       data: {},
     });
   }

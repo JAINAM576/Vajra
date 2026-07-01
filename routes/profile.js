@@ -11,6 +11,7 @@ const router = express.Router();
 
 const Shopkeeper = require('../models/Shopkeeper');
 const { authenticate, authorizeShopkeeper } = require('../middleware/auth');
+const { generateAndUploadWallpaper } = require('../utils/wallpaper');
 
 // All routes require shopkeeper auth
 router.use(authenticate, authorizeShopkeeper);
@@ -69,6 +70,8 @@ router.put('/', async (req, res) => {
       });
     }
 
+    const nameOrShopChanged = updates.shopkeeperName !== undefined || updates.shopName !== undefined;
+
     const shopkeeper = await Shopkeeper.findByIdAndUpdate(
       req.user.id,
       { $set: updates },
@@ -81,6 +84,22 @@ router.put('/', async (req, res) => {
         message: 'Profile not found.',
         data: {},
       });
+    }
+
+    if (nameOrShopChanged) {
+      try {
+        const newWallpaperUrl = await generateAndUploadWallpaper(
+          shopkeeper.shopName,
+          shopkeeper.mobileNo,
+          shopkeeper._id.toString(),
+          shopkeeper.wallpaperUrl
+        );
+        shopkeeper.wallpaperUrl = newWallpaperUrl;
+        await shopkeeper.save();
+        console.log(`[ProfileUpdate] Wallpaper regenerated successfully for shopkeeper: ${shopkeeper._id}`);
+      } catch (err) {
+        console.error('[ProfileUpdate] Failed to regenerate wallpaper on profile change:', err.message);
+      }
     }
 
     return res.status(200).json({
@@ -188,6 +207,65 @@ router.put('/notifications', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Server error updating notification settings.',
+      data: {},
+    });
+  }
+});
+
+// ─── PUT /password — Change own password ─────────────────────────────
+router.put('/password', async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Current password and new password are required.',
+        data: {},
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'New password must be at least 6 characters.',
+        data: {},
+      });
+    }
+
+    const shopkeeper = await Shopkeeper.findById(req.user.id);
+    if (!shopkeeper) {
+      return res.status(404).json({
+        success: false,
+        message: 'Profile not found.',
+        data: {},
+      });
+    }
+
+    // Compare with current password
+    const isMatch = await shopkeeper.comparePassword(currentPassword);
+    if (!isMatch) {
+      return res.status(400).json({
+        success: false,
+        message: 'Current password is incorrect.',
+        data: {},
+      });
+    }
+
+    // Set new password (it will be hashed by the mongoose pre-save hook)
+    shopkeeper.password = newPassword;
+    await shopkeeper.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Password changed successfully.',
+      data: {},
+    });
+  } catch (error) {
+    console.error('Change password error:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error changing password.',
       data: {},
     });
   }

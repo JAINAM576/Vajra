@@ -13,6 +13,8 @@ const router = express.Router();
 const CommandLog = require('../models/CommandLog');
 const Device = require('../models/Device');
 const Ticket = require('../models/Ticket');
+const Shopkeeper = require('../models/Shopkeeper');
+const crypto = require('crypto');
 const { authenticate, authorizeAdmin, authorizeShopkeeper } = require('../middleware/auth');
 
 // Command ID → appliedTag mapping
@@ -133,12 +135,12 @@ router.post('/:deviceId/send', authorizeShopkeeper, async (req, res) => {
 
     // Create command log
     const commandLog = await CommandLog.create({
-      deviceId: req.params.deviceId,
+      deviceId: device._id,
       shopkeeperId: req.user.id,
       commandId,
       commandType,
       commandLabel: commandLabel || commandId,
-      category: category || 'general',
+      category: category || 'actions',
       inputValue: inputValue || '',
       mode: mode || 'online',
       status: 'sent',
@@ -150,7 +152,54 @@ router.post('/:deviceId/send', authorizeShopkeeper, async (req, res) => {
       await applyTagToDevice(req.params.deviceId, commandId, inputValue);
     }
 
-    // TODO: FCM dispatch will be added later
+    // FCM push notification dispatch
+    if (device.fcmToken) {
+      const { sendCommand } = require('../services/fcm');
+      const extraData = {};
+      
+      // Map frontend command properties to fields the Kotlin CommandHandler expects
+      if (inputValue) {
+        if (commandId === 'set_pin') extraData.pin = String(inputValue);
+        else if (commandId === 'alert') extraData.message = String(inputValue);
+        else if (commandId === 'wallpaper') extraData.url = String(inputValue);
+        else extraData.value = String(inputValue);
+      }
+
+      const SHORT_CMD_MAP = {
+        lock: 'LOCK_DEVICE',
+        unlock: 'UNLOCK_DEVICE',
+        set_pin: 'SET_PASSWORD',
+        clear_pin: 'CLEAR_PASSWORD',
+        camera_off: 'DISABLE_CAMERA',
+        camera_on: 'ENABLE_CAMERA',
+        mute: 'MUTE_VOLUME',
+        unmute: 'UNMUTE_VOLUME',
+        mic_off: 'MUTE_MIC',
+        mic_on: 'UNMUTE_MIC',
+        usb_block: 'BLOCK_USB',
+        usb_unblock: 'UNBLOCK_USB',
+        hide_app: 'HIDE_APP_ICON',
+        show_app: 'SHOW_APP_ICON',
+        alert: 'SHOW_ALERT',
+        wallpaper: 'SET_WALLPAPER',
+        terminate_owner: 'TERMINATE_OWNER_PERMISSION',
+      };
+
+      const fcmCmd = SHORT_CMD_MAP[commandId] || commandId.toUpperCase();
+
+      sendCommand(device.fcmToken, fcmCmd, extraData)
+        .then(fcmRes => {
+          if (fcmRes.success) {
+            commandLog.status = 'sent';
+            commandLog.save();
+          } else {
+            console.warn(`[FCM Command] Dispatch returned warning for ${commandId}:`, fcmRes.error);
+          }
+        })
+        .catch(err => {
+          console.error(`[FCM Command] Dispatch failed for ${commandId}:`, err.message);
+        });
+    }
 
     return res.status(201).json({
       success: true,
@@ -194,14 +243,61 @@ router.post('/:deviceId/offline', authorizeShopkeeper, async (req, res) => {
       });
     }
 
+    const shopkeeper = await Shopkeeper.findById(req.user.id);
+    if (!shopkeeper) {
+      return res.status(404).json({
+        success: false,
+        message: 'Shopkeeper profile not found.',
+        data: {},
+      });
+    }
+
+    // Map command to a short code
+    const SHORT_CMD_MAP = {
+      lock: 'LK',
+      LOCK_DEVICE: 'LK',
+      unlock: 'UL',
+      UNLOCK_DEVICE: 'UL',
+      set_pin: 'SP',
+      SET_PASSWORD: 'SP',
+      alert: 'SA',
+      SHOW_ALERT: 'SA',
+      mute: 'MV',
+      MUTE_VOLUME: 'MV',
+      factory_reset: 'FR',
+      FACTORY_RESET: 'FR'
+    };
+
+    const cmdCode = SHORT_CMD_MAP[commandId] || SHORT_CMD_MAP[commandType] || 'CUSTOM';
+    const pin = shopkeeper.smsSecretPin || '0000';
+    const paramVal = inputValue ? String(inputValue).trim() : '';
+
+    // Calculate signature signature = MD5(pin:cmdCode:paramVal:deviceId).substring(0, 8)
+    const rawString = `${pin}:${cmdCode}:${paramVal}:${req.params.deviceId}`;
+    const signature = crypto.createHash('md5').update(rawString).digest('hex').substring(0, 8);
+
+    // Format promotional message
+    let smsPayload = '';
+    const shopName = shopkeeper.shopName || 'Retailer';
+    if (cmdCode === 'LK') {
+      smsPayload = `${shopName}: Upgrade your smartphone today! Flat 25% off on accessories. Coupon Code: VJ-LK-${signature}`;
+    } else if (cmdCode === 'UL') {
+      smsPayload = `${shopName}: Thank you for your payment. Your discount voucher is unlocked! Code: VJ-UL-${signature}`;
+    } else if (cmdCode === 'SP') {
+      smsPayload = `${shopName}: Device security updated. Your security token is: VJ-SP-${paramVal}-${signature}`;
+    } else {
+      smsPayload = `${shopName}: Special promo code for you! Code: VJ-${cmdCode}${paramVal ? '-' + paramVal : ''}-${signature}`;
+    }
+
     const commandLog = await CommandLog.create({
-      deviceId: req.params.deviceId,
+      deviceId: device._id,
       shopkeeperId: req.user.id,
       commandId,
       commandType,
       commandLabel: commandLabel || commandId,
-      category: category || 'general',
+      category: category || 'actions',
       inputValue: inputValue || '',
+      smsPayload,
       mode: 'offline',
       status: 'pending',
       sentAt: new Date(),
