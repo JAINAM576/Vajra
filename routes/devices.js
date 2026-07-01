@@ -426,7 +426,7 @@ router.delete('/:deviceId/permanent', authorizeAdmin, async (req, res) => {
 
     // Delete device and related command logs
     await Promise.all([
-      CommandLog.deleteMany({ deviceId: req.params.deviceId }),
+      CommandLog.deleteMany({ deviceId: device._id }),
       Device.findByIdAndDelete(device._id),
     ]);
 

@@ -95,6 +95,15 @@ const shopkeeperSchema = new mongoose.Schema(
       whatsappAuto: { type: Boolean, default: false },
       smsAlerts: { type: Boolean, default: false },
     },
+    resetPasswordOtp: {
+      type: String,
+    },
+    resetPasswordOtpExpires: {
+      type: Date,
+    },
+    resetPasswordOtpSentAt: {
+      type: Date,
+    },
   },
   {
     timestamps: true,

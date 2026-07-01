@@ -5,6 +5,8 @@
  * POST   /wallpapers    — Add wallpaper template (admin only)
  * DELETE /wallpapers/:index — Remove wallpaper template (admin only)
  * PUT    /qr            — Update payment QR URL (admin only)
+ * POST   /upload        — Upload base64 image to Cloudinary (admin only)
+ * PUT    /device-owner-qr — Update device owner QR URL (admin only)
  */
 
 const express = require('express');
@@ -14,7 +16,7 @@ const cloudinary = require('cloudinary').v2;
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
+  api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
 const Config = require('../models/SystemConfig');

@@ -128,4 +128,20 @@ const authorizeShopkeeper = (req, res, next) => {
   });
 };
 
-module.exports = { authenticate, authorizeAdmin, authorizeShopkeeper };
+/**
+ * authorizeRoles — Allow any of the specified roles.
+ */
+const authorizeRoles = (...allowedRoles) => {
+  return (req, res, next) => {
+    if (!req.user || !allowedRoles.includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access Denied: Insufficient permissions.',
+        data: {},
+      });
+    }
+    next();
+  };
+};
+
+module.exports = { authenticate, authorizeAdmin, authorizeShopkeeper, authorizeRoles };

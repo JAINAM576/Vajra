@@ -4,6 +4,7 @@
  * PUT  /               — Update own profile
  * PUT  /wallpaper      — Update wallpaper URL
  * PUT  /notifications  — Update notification settings
+ * PUT  /password       — Change own password
  */
 
 const express = require('express');

@@ -193,8 +193,7 @@ router.post('/shopkeeper/register', async (req, res) => {
     const token = signToken({ id: shopkeeper._id, role: 'shopkeeper' });
 
     // Remove password from response
-    const shopkeeperObj = shopkeeper.toObject();
-    delete shopkeeperObj.password;
+    const shopkeeperObj = shopkeeper.toJSON();
 
     return res.status(201).json({
       success: true,
@@ -277,8 +276,7 @@ router.post('/shopkeeper/login', async (req, res) => {
     const token = signToken({ id: shopkeeper._id, role: 'shopkeeper' });
 
     // Remove password from response
-    const shopkeeperObj = shopkeeper.toObject();
-    delete shopkeeperObj.password;
+    const shopkeeperObj = shopkeeper.toJSON();
 
     return res.status(200).json({
       success: true,
@@ -324,6 +322,15 @@ router.post('/shopkeeper/forgot-password', async (req, res) => {
       });
     }
 
+    // Rate limit: 1 minute between OTP requests
+    if (shopkeeper.resetPasswordOtpSentAt && Date.now() - shopkeeper.resetPasswordOtpSentAt < 60 * 1000) {
+      return res.status(429).json({
+        success: false,
+        message: 'Please wait 1 minute before requesting another OTP.',
+        data: {},
+      });
+    }
+
     // 1. Generate 6-digit numeric OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
@@ -331,9 +338,10 @@ router.post('/shopkeeper/forgot-password', async (req, res) => {
     const hashedOtp = crypto.createHash('sha256').update(otp).digest('hex');
     shopkeeper.resetPasswordOtp = hashedOtp;
     shopkeeper.resetPasswordOtpExpires = Date.now() + 10 * 60 * 1000;
+    shopkeeper.resetPasswordOtpSentAt = Date.now();
     await shopkeeper.save();
 
-    // 3. Send email via Nodemailer
+    // 3. Send email via sendEmail utility
     const message = `Your password reset verification code is: ${otp}\nThis code is valid for 10 minutes. Please do not share it with anyone.`;
     const html = `
       <div style="font-family: sans-serif; padding: 20px; line-height: 1.6; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 8px;">

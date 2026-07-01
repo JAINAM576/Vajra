@@ -15,7 +15,7 @@ const Device = require('../models/Device');
 const Ticket = require('../models/Ticket');
 const Shopkeeper = require('../models/Shopkeeper');
 const crypto = require('crypto');
-const { authenticate, authorizeAdmin, authorizeShopkeeper } = require('../middleware/auth');
+const { authenticate, authorizeAdmin, authorizeShopkeeper, authorizeRoles } = require('../middleware/auth');
 
 // Command ID → appliedTag mapping
 const COMMAND_TAG_MAP = {
@@ -107,7 +107,7 @@ router.get('/recent', authorizeAdmin, async (req, res) => {
 });
 
 // ─── POST /:deviceId/send — Send command (Shopkeeper, online) ────────
-router.post('/:deviceId/send', authorizeShopkeeper, async (req, res) => {
+router.post('/:deviceId/send', authorizeRoles('shopkeeper', 'super_admin', 'support_admin'), async (req, res) => {
   try {
     const { commandId, commandType, commandLabel, category, inputValue, mode } = req.body;
 
@@ -119,24 +119,28 @@ router.post('/:deviceId/send', authorizeShopkeeper, async (req, res) => {
       });
     }
 
-    // Verify device exists and belongs to shopkeeper
-    const device = await Device.findOne({
-      deviceId: req.params.deviceId,
-      shopkeeperId: req.user.id,
-    });
+    // Verify device exists and belongs to shopkeeper (if role is shopkeeper)
+    const query = { deviceId: req.params.deviceId };
+    if (req.user.role === 'shopkeeper') {
+      query.shopkeeperId = req.user.id;
+    }
+    const device = await Device.findOne(query);
 
     if (!device) {
       return res.status(404).json({
         success: false,
-        message: 'Device not found or does not belong to you.',
+        message: req.user.role === 'shopkeeper'
+          ? 'Device not found or does not belong to you.'
+          : 'Device not found.',
         data: {},
       });
     }
 
     // Create command log
+    // Use device.shopkeeperId so admin commands are still attributed to the device's owner
     const commandLog = await CommandLog.create({
       deviceId: device._id,
-      shopkeeperId: req.user.id,
+      shopkeeperId: device.shopkeeperId,
       commandId,
       commandType,
       commandLabel: commandLabel || commandId,
@@ -217,7 +221,7 @@ router.post('/:deviceId/send', authorizeShopkeeper, async (req, res) => {
 });
 
 // ─── POST /:deviceId/offline — Queue offline command ─────────────────
-router.post('/:deviceId/offline', authorizeShopkeeper, async (req, res) => {
+router.post('/:deviceId/offline', authorizeRoles('shopkeeper', 'super_admin', 'support_admin'), async (req, res) => {
   try {
     const { commandId, commandType, commandLabel, category, inputValue } = req.body;
 
@@ -229,21 +233,24 @@ router.post('/:deviceId/offline', authorizeShopkeeper, async (req, res) => {
       });
     }
 
-    // Verify device exists and belongs to shopkeeper
-    const device = await Device.findOne({
-      deviceId: req.params.deviceId,
-      shopkeeperId: req.user.id,
-    });
+    // Verify device exists and belongs to shopkeeper (if role is shopkeeper)
+    const query = { deviceId: req.params.deviceId };
+    if (req.user.role === 'shopkeeper') {
+      query.shopkeeperId = req.user.id;
+    }
+    const device = await Device.findOne(query);
 
     if (!device) {
       return res.status(404).json({
         success: false,
-        message: 'Device not found or does not belong to you.',
+        message: req.user.role === 'shopkeeper'
+          ? 'Device not found or does not belong to you.'
+          : 'Device not found.',
         data: {},
       });
     }
 
-    const shopkeeper = await Shopkeeper.findById(req.user.id);
+    const shopkeeper = await Shopkeeper.findById(device.shopkeeperId);
     if (!shopkeeper) {
       return res.status(404).json({
         success: false,
@@ -291,7 +298,7 @@ router.post('/:deviceId/offline', authorizeShopkeeper, async (req, res) => {
 
     const commandLog = await CommandLog.create({
       deviceId: device._id,
-      shopkeeperId: req.user.id,
+      shopkeeperId: device.shopkeeperId,
       commandId,
       commandType,
       commandLabel: commandLabel || commandId,
@@ -325,12 +332,24 @@ router.get('/:deviceId/logs', async (req, res) => {
     const limit = parseInt(req.query.limit, 10) || 20;
     const skip = (page - 1) * limit;
 
-    const filter = { deviceId: req.params.deviceId };
-
-    // Shopkeepers can only see logs for their own devices
+    // Verify device exists and belongs to shopkeeper (if role is shopkeeper)
+    const deviceQuery = { deviceId: req.params.deviceId };
     if (req.user.role === 'shopkeeper') {
-      filter.shopkeeperId = req.user.id;
+      deviceQuery.shopkeeperId = req.user.id;
     }
+    const device = await Device.findOne(deviceQuery).lean();
+
+    if (!device) {
+      return res.status(404).json({
+        success: false,
+        message: req.user.role === 'shopkeeper'
+          ? 'Device not found or does not belong to you.'
+          : 'Device not found.',
+        data: {},
+      });
+    }
+
+    const filter = { deviceId: device._id };
 
     const [logs, total] = await Promise.all([
       CommandLog.find(filter)
@@ -419,13 +438,13 @@ router.put('/:logId/status', async (req, res) => {
         const { generateTicketId } = require('../utils/helpers');
         const ticketId = generateTicketId(lastNumber);
 
-        // Find device info for ticket
-        const device = await Device.findOne({ deviceId: commandLog.deviceId }).lean();
+        // Find device info for ticket using ObjectId
+        const device = await Device.findById(commandLog.deviceId).lean();
 
         await Ticket.create({
           ticketId,
           shopkeeperId: commandLog.shopkeeperId,
-          deviceId: commandLog.deviceId,
+          deviceId: device ? device._id : null,
           customerName: device ? device.customerName : 'Unknown',
           commandLogId: commandLog._id,
           commandAttempted: commandLog.commandType,
