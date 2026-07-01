@@ -68,7 +68,6 @@ const ticketSchema = new mongoose.Schema(
 );
 
 // Indexes
-ticketSchema.index({ ticketId: 1 });
 ticketSchema.index({ status: 1, priority: -1 });
 ticketSchema.index({ shopkeeperId: 1 });
 ticketSchema.index({ createdAt: -1 });

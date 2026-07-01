@@ -19,11 +19,11 @@ const randomChars = (len) => {
 };
 
 /**
- * Generate an activation key in format RUDRA-XXXX-XXXXXX
- * @returns {string} e.g. "RUDRA-A3K9-HJP4TN"
+ * Generate an activation key in format VAJRA-XXXX-XXXXXX
+ * @returns {string} e.g. "VAJRA-A3K9-HJP4TN"
  */
 const generateActivationKey = () => {
-  return `RUDRA-${randomChars(4)}-${randomChars(6)}`;
+  return `VAJRA-${randomChars(4)}-${randomChars(6)}`;
 };
 
 /**

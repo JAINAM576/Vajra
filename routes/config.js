@@ -5,21 +5,22 @@
  * POST   /wallpapers    — Add wallpaper template (admin only)
  * DELETE /wallpapers/:index — Remove wallpaper template (admin only)
  * PUT    /qr            — Update payment QR URL (admin only)
+ * POST   /upload        — Upload base64 image to Cloudinary (admin only)
+ * PUT    /device-owner-qr — Update device owner QR URL (admin only)
  */
 
 const express = require('express');
 const router = express.Router();
 const cloudinary = require('cloudinary').v2;
 
-const Config = require('../models/SystemConfig');
-const { authenticate, authorizeAdmin } = require('../middleware/auth');
-
-// Configure Cloudinary
 cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_NAME,
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
+
+const Config = require('../models/SystemConfig');
+const { authenticate, authorizeAdmin } = require('../middleware/auth');
 
 /**
  * Helper: Get or create the singleton platform config document.
@@ -63,6 +64,8 @@ router.put('/', async (req, res) => {
       'upiId',
       'maintenanceMode',
       'minAppVersion',
+      'deviceOwnerQrUrl',
+      'paymentQrUrl',
     ];
     const updates = {};
 
@@ -221,7 +224,41 @@ router.put('/qr', async (req, res) => {
   }
 });
 
-// ─── PUT /device-owner-qr — Update device owner QR URL (admin only) ───
+// ─── POST /upload — Upload base64 image to Cloudinary ────────────────
+router.post('/upload', async (req, res) => {
+  try {
+    const { image, folder } = req.body;
+
+    if (!image) {
+      return res.status(400).json({
+        success: false,
+        message: 'Base64 image string is required.',
+        data: {},
+      });
+    }
+
+    // Upload to Cloudinary (direct base64 support)
+    const uploadResponse = await cloudinary.uploader.upload(image, {
+      folder: folder || 'lockapp_assets',
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Image uploaded to Cloudinary successfully.',
+      data: { url: uploadResponse.secure_url },
+    });
+  } catch (error) {
+    console.error('Cloudinary upload error:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to upload image to Cloudinary.',
+      error: error.message,
+      data: {},
+    });
+  }
+});
+
+// ─── PUT /device-owner-qr — Update device owner app download QR URL ────
 router.put('/device-owner-qr', async (req, res) => {
   try {
     const { deviceOwnerQrUrl } = req.body;
@@ -247,48 +284,15 @@ router.put('/device-owner-qr', async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: 'Device Owner QR URL updated successfully.',
+      message: 'Device owner QR URL updated successfully.',
       data: { deviceOwnerQrUrl: config.deviceOwnerQrUrl },
     });
   } catch (error) {
-    console.error('Update Device Owner QR error:', error.message);
+    console.error('Update device owner QR error:', error.message);
     return res.status(500).json({
       success: false,
       message: 'Server error updating device owner QR URL.',
       data: {},
-    });
-  }
-});
-
-// ─── POST /upload — Upload base64 image (admin only) ───────────────────
-router.post('/upload', async (req, res) => {
-  try {
-    const { image } = req.body; // base64 string
-
-    if (!image) {
-      return res.status(400).json({
-        success: false,
-        message: 'Base64 image string is required.',
-      });
-    }
-
-    // Upload to Cloudinary
-    const uploadResponse = await cloudinary.uploader.upload(image, {
-      folder: 'lockapp_uploads',
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: 'Image uploaded successfully.',
-      data: {
-        url: uploadResponse.secure_url,
-      },
-    });
-  } catch (error) {
-    console.error('Image upload error:', error.message);
-    return res.status(500).json({
-      success: false,
-      message: 'Server error uploading image.',
     });
   }
 });

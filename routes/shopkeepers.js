@@ -17,6 +17,7 @@ const ActivationKey = require('../models/ActivationKey');
 const CommandLog = require('../models/CommandLog');
 const CreditTransaction = require('../models/CreditTransaction');
 const { authenticate, authorizeAdmin } = require('../middleware/auth');
+const { generateAndUploadWallpaper } = require('../utils/wallpaper');
 
 // All routes require admin auth
 router.use(authenticate, authorizeAdmin);
@@ -125,6 +126,8 @@ router.put('/:id', async (req, res) => {
       });
     }
 
+    const nameOrShopChanged = updates.shopkeeperName !== undefined || updates.shopName !== undefined;
+
     const shopkeeper = await Shopkeeper.findByIdAndUpdate(
       req.params.id,
       { $set: updates },
@@ -137,6 +140,22 @@ router.put('/:id', async (req, res) => {
         message: 'Shopkeeper not found.',
         data: {},
       });
+    }
+
+    if (nameOrShopChanged) {
+      try {
+        const newWallpaperUrl = await generateAndUploadWallpaper(
+          shopkeeper.shopName,
+          shopkeeper.mobileNo,
+          shopkeeper._id.toString(),
+          shopkeeper.wallpaperUrl
+        );
+        shopkeeper.wallpaperUrl = newWallpaperUrl;
+        await shopkeeper.save();
+        console.log(`[AdminShopkeeperUpdate] Wallpaper regenerated successfully for shopkeeper: ${shopkeeper._id}`);
+      } catch (err) {
+        console.error('[AdminShopkeeperUpdate] Failed to regenerate wallpaper on shopkeeper update:', err.message);
+      }
     }
 
     return res.status(200).json({

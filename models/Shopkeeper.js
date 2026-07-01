@@ -75,6 +75,18 @@ const shopkeeperSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    smsSecretPin: {
+      type: String,
+      default: '0000',
+    },
+    resetPasswordOtp: {
+      type: String,
+      default: null,
+    },
+    resetPasswordOtpExpires: {
+      type: Date,
+      default: null,
+    },
 
     // Notification Preferences (embedded sub-document)
     notificationSettings: {

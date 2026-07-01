@@ -30,6 +30,9 @@ const commandLogSchema = new mongoose.Schema(
     inputValue: {
       type: String, // if command had input (PIN, alert msg, wallpaper URL)
     },
+    smsPayload: {
+      type: String,
+    },
 
     // Execution Mode
     mode: {

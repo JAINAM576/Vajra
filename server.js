@@ -23,6 +23,7 @@ app.use('/api/auth', require('./routes/auth'));
 app.use('/api/shopkeepers', require('./routes/shopkeepers'));
 app.use('/api/profile', require('./routes/profile'));
 app.use('/api/devices', require('./routes/devices'));
+app.use('/api/device', require('./routes/deviceCompat'));
 app.use('/api/keys', require('./routes/keys'));
 app.use('/api/commands', require('./routes/commands'));
 app.use('/api/credits', require('./routes/credits'));
@@ -74,3 +75,5 @@ const startServer = async () => {
 };
 
 startServer();
+
+module.exports = app;

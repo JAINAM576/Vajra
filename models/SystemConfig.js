@@ -29,6 +29,7 @@ const systemConfigSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    // Device Owner QR (Cloudinary URL — uploaded later)
     deviceOwnerQrUrl: {
       type: String,
       default: '',
