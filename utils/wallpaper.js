@@ -3,42 +3,16 @@
  * Generates a personalised lockscreen wallpaper by overlaying shopkeeper info
  * on the base template image, then uploads the result to Cloudinary.
  *
- * IMPORTANT: To support rendering fonts on all server environments (Docker, Render, etc.)
- * where system fonts are not installed, we dynamically configure fontconfig to search
- * our local bundled fonts directory.
+ * NOTE: Converts all text to SVG path outlines using pure JavaScript text-to-svg.
+ * This guarantees identical rendering on any platform (Vercel, AWS Lambda, Docker, etc.)
+ * without requiring system fonts or fontconfig.
  */
 
-const path = require('path');
-const fs = require('fs');
-
-// ─── Setup custom Fontconfig to load local TTF files ─────────────────
-const FONTS_DIR = path.join(__dirname, '..', 'fonts');
-const FONTS_CONF_DIR = FONTS_DIR; // Keep fonts.conf in the fonts directory
-const FONTS_CONF_PATH = path.join(FONTS_CONF_DIR, 'fonts.conf');
-
-try {
-  // Generate fonts.conf dynamically using the absolute path
-  const fontsConfContent = `<?xml version="1.0"?>
-<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
-<fontconfig>
-  <dir prefix="default">${FONTS_DIR}</dir>
-  <cachedir prefix="default">${path.join(FONTS_DIR, '.cache')}</cachedir>
-</fontconfig>`;
-
-  if (!fs.existsSync(FONTS_DIR)) {
-    fs.mkdirSync(FONTS_DIR, { recursive: true });
-  }
-  
-  fs.writeFileSync(FONTS_CONF_PATH, fontsConfContent);
-  process.env.FONTCONFIG_PATH = FONTS_CONF_DIR;
-  console.log(`[Wallpaper] Fontconfig configured. FONTCONFIG_PATH set to: ${process.env.FONTCONFIG_PATH}`);
-} catch (err) {
-  console.error('[Wallpaper] Failed to configure local fontconfig:', err.message);
-}
-
-// Now load sharp and other dependencies
 const sharp = require('sharp');
 const cloudinary = require('cloudinary').v2;
+const path = require('path');
+const fs = require('fs');
+const TextToSVG = require('text-to-svg');
 
 // Configure Cloudinary from env
 cloudinary.config({
@@ -48,98 +22,190 @@ cloudinary.config({
 });
 
 const TEMPLATE_PATH = path.join(__dirname, '..', 'images', 'wallpaper_image.jpeg');
+const FONTS_DIR = path.join(__dirname, '..', 'fonts');
 
-// Font family string: Noto Sans (Latin) and Noto Sans Devanagari (Hindi)
-const LATIN_FONT = "'Noto Sans', Arial, Helvetica, sans-serif";
-const HINDI_FONT = "'Noto Sans Devanagari', 'Noto Sans', Arial, Helvetica, sans-serif";
+// Load fonts at startup
+let latinRegular, latinBold, devanagariRegular, devanagariBold;
+try {
+  latinRegular = TextToSVG.loadSync(path.join(FONTS_DIR, 'NotoSans-Regular.ttf'));
+  latinBold = TextToSVG.loadSync(path.join(FONTS_DIR, 'NotoSans-Bold.ttf'));
+  devanagariRegular = TextToSVG.loadSync(path.join(FONTS_DIR, 'NotoSansDevanagari-Regular.ttf'));
+  devanagariBold = TextToSVG.loadSync(path.join(FONTS_DIR, 'NotoSansDevanagari-Bold.ttf'));
+  console.log('[Wallpaper] All fonts loaded successfully for path rendering');
+} catch (err) {
+  console.error('[Wallpaper] Error loading fonts for path rendering:', err.message);
+}
 
 /**
- * Build an SVG text overlay that matches the reference design exactly.
- *
- * Template (900×1600) has these fixed design elements:
- *   - Top area (y=0–380): Vajra logo, shield/lock icons, dot grids
- *   - First divider line with lock icon: ~y=770
- *   - Second divider line with lock icon: ~y=1140
- *   - Bottom area (y=1150–1600): Shield icon, dot grid, wave pattern
- *
- * Text placement zones (matching the reference image):
- *   ZONE 1 (y=400–740): "ATTENTION" + English EMI message
- *   ZONE 2 (y=820–1080): Hindi EMI message
- *   ZONE 3 (y=1190–1400): Contact Your Retailer / shop name / phone
+ * Helper to render spaced letter outlines.
+ */
+function getPathWithLetterSpacing(textToSVG, text, options) {
+  const { x, y, fontSize, letterSpacing, anchor = 'center middle', attributes = {} } = options;
+  const chars = text.split('');
+  const charMetrics = chars.map(c => textToSVG.getMetrics(c, { fontSize }));
+  const totalWidth = charMetrics.reduce((sum, m) => sum + m.width, 0) + (chars.length - 1) * letterSpacing;
+  
+  let startX = x;
+  if (anchor.includes('center')) {
+    startX = x - totalWidth / 2;
+  } else if (anchor.includes('right')) {
+    startX = x - totalWidth;
+  }
+  
+  const paths = [];
+  let currentX = startX;
+  
+  for (let i = 0; i < chars.length; i++) {
+    const char = chars[i];
+    const metrics = charMetrics[i];
+    const charPath = textToSVG.getPath(char, {
+      x: currentX,
+      y: y,
+      fontSize,
+      anchor: 'left middle',
+      attributes
+    });
+    paths.push(charPath);
+    currentX += metrics.width + letterSpacing;
+  }
+  
+  return paths.join('\n');
+}
+
+/**
+ * Build an SVG with path overlays instead of text tags to guarantee portablity.
  */
 function buildOverlaySvg(shopName, mobileNo, width = 900, height = 1600) {
-  const esc = (s) =>
-    String(s || '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+  // Use regular fallback if bold fonts failed to load
+  const regularFont = latinRegular;
+  const boldFont = latinBold || regularFont;
+  const devRegularFont = devanagariRegular || regularFont;
+  const devBoldFont = devanagariBold || devRegularFont || regularFont;
 
-  const safeShop = esc(shopName).toUpperCase();
-  const safeMobile = esc(mobileNo);
+  // --- Zone 1 Paths ---
+  const attentionPath = boldFont.getPath('ATTENTION', {
+    x: 450,
+    y: 460,
+    fontSize: 60,
+    anchor: 'center middle',
+    attributes: { fill: '#FFFFFF' }
+  });
+  
+  // Calculate underline size for ATTENTION
+  const attentionMetrics = boldFont.getMetrics('ATTENTION', { fontSize: 60 });
+  const attentionWidth = attentionMetrics.width;
+  const attentionUnderline = `<rect x="${450 - attentionWidth / 2}" y="495" width="${attentionWidth}" height="5" fill="#FFFFFF" />`;
 
-  // Dynamic font-size for long shop names
-  const shopFontSize = safeShop.length > 24 ? 34 : safeShop.length > 16 ? 40 : 48;
+  const dearCustomerPath = regularFont.getPath('Dear Customer,', {
+    x: 450,
+    y: 540,
+    fontSize: 33,
+    anchor: 'center middle',
+    attributes: { fill: 'rgba(255,255,255,0.92)' }
+  });
+
+  const emiEnglish1Path = regularFont.getPath('Kindly pay your EMI before Due', {
+    x: 450,
+    y: 590,
+    fontSize: 33,
+    anchor: 'center middle',
+    attributes: { fill: 'rgba(255,255,255,0.92)' }
+  });
+
+  const emiEnglish2Path = regularFont.getPath('date to avoid locking of your', {
+    x: 450,
+    y: 640,
+    fontSize: 33,
+    anchor: 'center middle',
+    attributes: { fill: 'rgba(255,255,255,0.92)' }
+  });
+
+  const emiEnglish3Path = regularFont.getPath('device.', {
+    x: 450,
+    y: 690,
+    fontSize: 33,
+    anchor: 'center middle',
+    attributes: { fill: 'rgba(255,255,255,0.92)' }
+  });
+
+  // --- Zone 2 Paths (Hindi) ---
+  const emiHindi1Path = devBoldFont.getPath('कृपया अपने डिवाइस को लॉक होने से', {
+    x: 450,
+    y: 910,
+    fontSize: 34,
+    anchor: 'center middle',
+    attributes: { fill: 'rgba(255,255,255,0.88)' }
+  });
+
+  const emiHindi2Path = devBoldFont.getPath('बचाने के लिए नियत तारीख से पहले', {
+    x: 450,
+    y: 970,
+    fontSize: 34,
+    anchor: 'center middle',
+    attributes: { fill: 'rgba(255,255,255,0.88)' }
+  });
+
+  const emiHindi3Path = devBoldFont.getPath('अपनी किस्त का भुगतान करें।', {
+    x: 450,
+    y: 1030,
+    fontSize: 34,
+    anchor: 'center middle',
+    attributes: { fill: 'rgba(255,255,255,0.88)' }
+  });
+
+  // --- Zone 3 Paths ---
+  const contactRetailerPath = regularFont.getPath('Contact Your Retailer', {
+    x: 450,
+    y: 1210,
+    fontSize: 27,
+    anchor: 'center middle',
+    attributes: { fill: 'rgba(255,255,255,0.72)' }
+  });
+
+  const upperShopName = String(shopName || '').toUpperCase();
+  const shopFontSize = upperShopName.length > 24 ? 34 : upperShopName.length > 16 ? 40 : 48;
+  const shopNamePath = boldFont.getPath(upperShopName, {
+    x: 450,
+    y: 1270,
+    fontSize: shopFontSize,
+    anchor: 'center middle',
+    attributes: { fill: '#FFFFFF' }
+  });
+
+  const contactInfoLabelPath = regularFont.getPath('Contact Info', {
+    x: 450,
+    y: 1320,
+    fontSize: 25,
+    anchor: 'center middle',
+    attributes: { fill: 'rgba(255,255,255,0.68)' }
+  });
+
+  const mobileNoPath = getPathWithLetterSpacing(boldFont, String(mobileNo || ''), {
+    x: 450,
+    y: 1370,
+    fontSize: 36,
+    letterSpacing: 8,
+    anchor: 'center middle',
+    attributes: { fill: 'rgba(255,255,255,0.92)' }
+  });
 
   return Buffer.from(`
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+  ${attentionPath}
+  ${attentionUnderline}
+  ${dearCustomerPath}
+  ${emiEnglish1Path}
+  ${emiEnglish2Path}
+  ${emiEnglish3Path}
 
-  <!-- ═══ ZONE 1: Above first divider (y=400–740) ═══ -->
+  ${emiHindi1Path}
+  ${emiHindi2Path}
+  ${emiHindi3Path}
 
-  <text x="50%" y="460" text-anchor="middle"
-        font-size="60" font-weight="900" fill="#FFFFFF"
-        font-family="${LATIN_FONT}"
-        letter-spacing="8" text-decoration="underline">ATTENTION</text>
-
-  <text x="50%" y="540" text-anchor="middle"
-        font-size="33" font-weight="400" fill="rgba(255,255,255,0.92)"
-        font-family="${LATIN_FONT}">Dear Customer,</text>
-
-  <text x="50%" y="590" text-anchor="middle"
-        font-size="33" font-weight="400" fill="rgba(255,255,255,0.92)"
-        font-family="${LATIN_FONT}">Kindly pay your EMI before Due</text>
-
-  <text x="50%" y="640" text-anchor="middle"
-        font-size="33" font-weight="400" fill="rgba(255,255,255,0.92)"
-        font-family="${LATIN_FONT}">date to avoid locking of your</text>
-
-  <text x="50%" y="690" text-anchor="middle"
-        font-size="33" font-weight="400" fill="rgba(255,255,255,0.92)"
-        font-family="${LATIN_FONT}">device.</text>
-
-  <!-- ═══ ZONE 2: Between dividers (y=820–1080) ═══ -->
-
-  <text x="50%" y="910" text-anchor="middle"
-        font-size="34" font-weight="600" fill="rgba(255,255,255,0.88)"
-        font-family="${HINDI_FONT}">कृपया अपने डिवाइस को लॉक होने से</text>
-
-  <text x="50%" y="970" text-anchor="middle"
-        font-size="34" font-weight="600" fill="rgba(255,255,255,0.88)"
-        font-family="${HINDI_FONT}">बचाने के लिए नियत तारीख से पहले</text>
-
-  <text x="50%" y="1030" text-anchor="middle"
-        font-size="34" font-weight="600" fill="rgba(255,255,255,0.88)"
-        font-family="${HINDI_FONT}">अपनी किस्त का भुगतान करें।</text>
-
-  <!-- ═══ ZONE 3: Below second divider (y=1190–1400) ═══ -->
-
-  <text x="50%" y="1210" text-anchor="middle"
-        font-size="27" font-weight="400" fill="rgba(255,255,255,0.72)"
-        font-family="${LATIN_FONT}">Contact Your Retailer</text>
-
-  <text x="50%" y="1270" text-anchor="middle"
-        font-size="${shopFontSize}" font-weight="800" fill="#FFFFFF"
-        font-family="${LATIN_FONT}">${safeShop}</text>
-
-  <text x="50%" y="1320" text-anchor="middle"
-        font-size="25" font-weight="400" fill="rgba(255,255,255,0.68)"
-        font-family="${LATIN_FONT}">Contact Info</text>
-
-  <text x="50%" y="1370" text-anchor="middle"
-        font-size="36" font-weight="600" fill="rgba(255,255,255,0.92)"
-        font-family="${LATIN_FONT}"
-        letter-spacing="4">${safeMobile}</text>
-
+  ${contactRetailerPath}
+  ${shopNamePath}
+  ${contactInfoLabelPath}
+  ${mobileNoPath}
 </svg>
   `.trim());
 }
@@ -183,16 +249,13 @@ function extractPublicId(url) {
  * @returns {Promise<string>} — the Cloudinary secure URL
  */
 async function generateAndUploadWallpaper(shopName, mobileNo, shopkeeperId, oldWallpaperUrl) {
-  // Read template
   const templateBuffer = fs.readFileSync(TEMPLATE_PATH);
   const metadata = await sharp(templateBuffer).metadata();
   const width = metadata.width || 900;
   const height = metadata.height || 1600;
 
-  // Create SVG overlay
   const svgOverlay = buildOverlaySvg(shopName, mobileNo, width, height);
 
-  // Composite the overlay on top of the template
   const compositeBuffer = await sharp(templateBuffer)
     .composite([
       {
@@ -208,7 +271,6 @@ async function generateAndUploadWallpaper(shopName, mobileNo, shopkeeperId, oldW
   const newPublicId = 'wallpaper';
   const fullNewPublicId = `${newFolder}/${newPublicId}`;
 
-  // If there was an old wallpaper, check and delete it if its public ID is different
   const oldPublicId = extractPublicId(oldWallpaperUrl);
   if (oldPublicId && oldPublicId !== fullNewPublicId) {
     try {
@@ -219,7 +281,6 @@ async function generateAndUploadWallpaper(shopName, mobileNo, shopkeeperId, oldW
     }
   }
 
-  // Upload to Cloudinary folder-wise
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
       {
