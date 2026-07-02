@@ -4,42 +4,16 @@
  * the warning/alert note on the base wallpaper template (without shopkeeper info),
  * and uploads it to Cloudinary as a single generic resource.
  *
- * IMPORTANT: To support rendering fonts on all server environments (Docker, Render, etc.)
- * where system fonts are not installed, we dynamically configure fontconfig to search
- * our local bundled fonts directory.
+ * NOTE: Converts all text to SVG path outlines using pure JavaScript text-to-svg.
+ * This guarantees identical rendering on any platform (Vercel, AWS Lambda, Docker, etc.)
+ * without requiring system fonts or fontconfig.
  */
 
-const path = require('path');
-const fs = require('fs');
-
-// ─── Setup custom Fontconfig to load local TTF files ─────────────────
-const FONTS_DIR = path.join(__dirname, '..', 'fonts');
-const FONTS_CONF_DIR = FONTS_DIR; // Keep fonts.conf in the fonts directory
-const FONTS_CONF_PATH = path.join(FONTS_CONF_DIR, 'fonts.conf');
-
-try {
-  // Generate fonts.conf dynamically using the absolute path
-  const fontsConfContent = `<?xml version="1.0"?>
-<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
-<fontconfig>
-  <dir prefix="default">${FONTS_DIR}</dir>
-  <cachedir prefix="default">${path.join(FONTS_DIR, '.cache')}</cachedir>
-</fontconfig>`;
-
-  if (!fs.existsSync(FONTS_DIR)) {
-    fs.mkdirSync(FONTS_DIR, { recursive: true });
-  }
-  
-  fs.writeFileSync(FONTS_CONF_PATH, fontsConfContent);
-  process.env.FONTCONFIG_PATH = FONTS_CONF_DIR;
-  console.log(`[AlertImage] Fontconfig configured. FONTCONFIG_PATH set to: ${process.env.FONTCONFIG_PATH}`);
-} catch (err) {
-  console.error('[AlertImage] Failed to configure local fontconfig:', err.message);
-}
-
-// Now load sharp and other dependencies
 const sharp = require('sharp');
 const cloudinary = require('cloudinary').v2;
+const path = require('path');
+const fs = require('fs');
+const TextToSVG = require('text-to-svg');
 
 // Configure Cloudinary
 cloudinary.config({
@@ -49,10 +23,19 @@ cloudinary.config({
 });
 
 const TEMPLATE_PATH = path.join(__dirname, '..', 'images', 'wallpaper_image.jpeg');
+const FONTS_DIR = path.join(__dirname, '..', 'fonts');
 
-// Font family strings
-const LATIN_FONT = "'Noto Sans', Arial, Helvetica, sans-serif";
-const HINDI_FONT = "'Noto Sans Devanagari', 'Noto Sans', Arial, Helvetica, sans-serif";
+// Load fonts at startup
+let latinRegular, latinBold, devanagariRegular, devanagariBold;
+try {
+  latinRegular = TextToSVG.loadSync(path.join(FONTS_DIR, 'NotoSans-Regular.ttf'));
+  latinBold = TextToSVG.loadSync(path.join(FONTS_DIR, 'NotoSans-Bold.ttf'));
+  devanagariRegular = TextToSVG.loadSync(path.join(FONTS_DIR, 'NotoSansDevanagari-Regular.ttf'));
+  devanagariBold = TextToSVG.loadSync(path.join(FONTS_DIR, 'NotoSansDevanagari-Bold.ttf'));
+  console.log('[AlertImage] All fonts loaded successfully for path rendering');
+} catch (err) {
+  console.error('[AlertImage] Error loading fonts for path rendering:', err.message);
+}
 
 /**
  * Wraps text into lines of a maximum length to prevent visual overflow in SVG.
@@ -79,6 +62,11 @@ function wrapText(text, maxChars = 30) {
  * Builds the SVG overlay containing only the warning notes on top of the wallpaper template.
  */
 function buildAlertSvg(alertMessage, width = 900, height = 1600) {
+  const regularFont = latinRegular;
+  const boldFont = latinBold || regularFont;
+  const devRegularFont = devanagariRegular || regularFont;
+  const devBoldFont = devanagariBold || devRegularFont || regularFont;
+
   const esc = (s) =>
     String(s || '')
       .replace(/&/g, '&amp;')
@@ -92,66 +80,124 @@ function buildAlertSvg(alertMessage, width = 900, height = 1600) {
     const messageLines = wrapText(esc(alertMessage), 28);
     const messageStartLineY = 620;
     const lineSpacing = 55;
-    const messageTextsSvg = messageLines
-      .map((line, index) => {
-        const y = messageStartLineY + index * lineSpacing;
-        return `<text x="50%" y="${y}" text-anchor="middle"
-              font-size="34" font-weight="600" fill="rgba(255,255,255,0.95)"
-              font-family="${LATIN_FONT}">${line}</text>`;
-      })
-      .join('\n');
+    
+    // Draw ATTENTION header
+    const attentionPath = boldFont.getPath('ATTENTION', {
+      x: 450,
+      y: 460,
+      fontSize: 60,
+      anchor: 'center middle',
+      attributes: { fill: '#FFFFFF' }
+    });
+    
+    // Calculate underline size for ATTENTION
+    const attentionMetrics = boldFont.getMetrics('ATTENTION', { fontSize: 60 });
+    const attentionWidth = attentionMetrics.width;
+    const attentionUnderline = `<rect x="${450 - attentionWidth / 2}" y="495" width="${attentionWidth}" height="5" fill="#FFFFFF" />`;
+
+    // Render message lines
+    const messagePaths = messageLines.map((line, index) => {
+      const y = messageStartLineY + index * lineSpacing;
+      return regularFont.getPath(line, {
+        x: 450,
+        y: y,
+        fontSize: 34,
+        anchor: 'center middle',
+        attributes: { fill: 'rgba(255,255,255,0.95)' }
+      });
+    }).join('\n');
 
     return Buffer.from(`
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
-  <!-- ═══ ZONE 1: Header ═══ -->
-  <text x="50%" y="460" text-anchor="middle"
-        font-size="60" font-weight="900" fill="#FFFFFF"
-        font-family="${LATIN_FONT}"
-        letter-spacing="8" text-decoration="underline">ATTENTION</text>
-
-  <!-- ═══ ZONE 2: Custom Alert Message ═══ -->
-  ${messageTextsSvg}
+  ${attentionPath}
+  ${attentionUnderline}
+  ${messagePaths}
 </svg>
     `.trim());
   }
 
   // Default bilingual EMI attention warning (Standard note layout matched to wallpaper design)
+  const attentionPath = boldFont.getPath('ATTENTION', {
+    x: 450,
+    y: 460,
+    fontSize: 60,
+    anchor: 'center middle',
+    attributes: { fill: '#FFFFFF' }
+  });
+  
+  const attentionMetrics = boldFont.getMetrics('ATTENTION', { fontSize: 60 });
+  const attentionWidth = attentionMetrics.width;
+  const attentionUnderline = `<rect x="${450 - attentionWidth / 2}" y="495" width="${attentionWidth}" height="5" fill="#FFFFFF" />`;
+
+  const dearCustomerPath = regularFont.getPath('Dear Customer,', {
+    x: 450,
+    y: 540,
+    fontSize: 33,
+    anchor: 'center middle',
+    attributes: { fill: 'rgba(255,255,255,0.92)' }
+  });
+
+  const emiEnglish1Path = regularFont.getPath('Kindly pay your EMI before Due', {
+    x: 450,
+    y: 590,
+    fontSize: 33,
+    anchor: 'center middle',
+    attributes: { fill: 'rgba(255,255,255,0.92)' }
+  });
+
+  const emiEnglish2Path = regularFont.getPath('date to avoid locking of your', {
+    x: 450,
+    y: 640,
+    fontSize: 33,
+    anchor: 'center middle',
+    attributes: { fill: 'rgba(255,255,255,0.92)' }
+  });
+
+  const emiEnglish3Path = regularFont.getPath('device.', {
+    x: 450,
+    y: 690,
+    fontSize: 33,
+    anchor: 'center middle',
+    attributes: { fill: 'rgba(255,255,255,0.92)' }
+  });
+
+  // --- Zone 2 Paths (Hindi) ---
+  const emiHindi1Path = devBoldFont.getPath('कृपया अपने डिवाइस को लॉक होने से', {
+    x: 450,
+    y: 910,
+    fontSize: 34,
+    anchor: 'center middle',
+    attributes: { fill: 'rgba(255,255,255,0.88)' }
+  });
+
+  const emiHindi2Path = devBoldFont.getPath('बचाने के लिए नियत तारीख से पहले', {
+    x: 450,
+    y: 970,
+    fontSize: 34,
+    anchor: 'center middle',
+    attributes: { fill: 'rgba(255,255,255,0.88)' }
+  });
+
+  const emiHindi3Path = devBoldFont.getPath('अपनी किस्त का भुगतान करें।', {
+    x: 450,
+    y: 1030,
+    fontSize: 34,
+    anchor: 'center middle',
+    attributes: { fill: 'rgba(255,255,255,0.88)' }
+  });
+
   return Buffer.from(`
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
-  <!-- ═══ ZONE 1: Above first divider (y=400–740) ═══ -->
-  <text x="50%" y="460" text-anchor="middle"
-        font-size="60" font-weight="900" fill="#FFFFFF"
-        font-family="${LATIN_FONT}"
-        letter-spacing="8" text-decoration="underline">ATTENTION</text>
+  ${attentionPath}
+  ${attentionUnderline}
+  ${dearCustomerPath}
+  ${emiEnglish1Path}
+  ${emiEnglish2Path}
+  ${emiEnglish3Path}
 
-  <text x="50%" y="540" text-anchor="middle"
-        font-size="33" font-weight="400" fill="rgba(255,255,255,0.92)"
-        font-family="${LATIN_FONT}">Dear Customer,</text>
-
-  <text x="50%" y="590" text-anchor="middle"
-        font-size="33" font-weight="400" fill="rgba(255,255,255,0.92)"
-        font-family="${LATIN_FONT}">Kindly pay your EMI before Due</text>
-
-  <text x="50%" y="640" text-anchor="middle"
-        font-size="33" font-weight="400" fill="rgba(255,255,255,0.92)"
-        font-family="${LATIN_FONT}">date to avoid locking of your</text>
-
-  <text x="50%" y="690" text-anchor="middle"
-        font-size="33" font-weight="400" fill="rgba(255,255,255,0.92)"
-        font-family="${LATIN_FONT}">device.</text>
-
-  <!-- ═══ ZONE 2: Between dividers (y=820–1080) ═══ -->
-  <text x="50%" y="910" text-anchor="middle"
-        font-size="34" font-weight="600" fill="rgba(255,255,255,0.88)"
-        font-family="${HINDI_FONT}">कृपया अपने डिवाइस को लॉक होने से</text>
-
-  <text x="50%" y="970" text-anchor="middle"
-        font-size="34" font-weight="600" fill="rgba(255,255,255,0.88)"
-        font-family="${HINDI_FONT}">बचाने के लिए नियत तारीख से पहले</text>
-
-  <text x="50%" y="1030" text-anchor="middle"
-        font-size="34" font-weight="600" fill="rgba(255,255,255,0.88)"
-        font-family="${HINDI_FONT}">अपनी किस्त का भुगतान करें।</text>
+  ${emiHindi1Path}
+  ${emiHindi2Path}
+  ${emiHindi3Path}
 </svg>
   `.trim());
 }
@@ -174,7 +220,7 @@ async function generateAndUploadAlertImage(alertMessage) {
   const svgOverlay = buildAlertSvg(alertMessage, width, height);
 
   // Composite the overlay on top of the wallpaper template
-  const jpegBuffer = await sharp(templateBuffer)
+  const compositeBuffer = await sharp(templateBuffer)
     .composite([
       {
         input: svgOverlay,
@@ -208,7 +254,7 @@ async function generateAndUploadAlertImage(alertMessage) {
         resolve(result.secure_url);
       }
     );
-    uploadStream.end(jpegBuffer);
+    uploadStream.end(compositeBuffer);
   });
 }
 
