@@ -9,7 +9,7 @@ if (fs.existsSync(keyPath)) {
   try {
     const serviceAccount = require(keyPath);
     admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
+      credential: admin.cert(serviceAccount)
     });
     adminInitialized = true;
     console.log('✅ Firebase Admin initialized successfully (via serviceAccountKey.json)');
@@ -20,10 +20,10 @@ if (fs.existsSync(keyPath)) {
 } else if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
   try {
     admin.initializeApp({
-      credential: admin.credential.cert({
-        projectId: process.env.FIREBASE_PROJECT_ID,
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
+      credential: admin.cert({
+        project_id: process.env.FIREBASE_PROJECT_ID,
+        client_email: process.env.FIREBASE_CLIENT_EMAIL,
+        private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
       })
     });
     adminInitialized = true;

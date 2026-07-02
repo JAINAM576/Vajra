@@ -146,7 +146,11 @@ router.get('/', async (req, res) => {
 // ─── GET /:deviceId — Get device by deviceId field ───────────────────
 router.get('/:deviceId', async (req, res) => {
   try {
-    const filter = { deviceId: req.params.deviceId };
+    const mongoose = require('mongoose');
+    const isObjectId = mongoose.Types.ObjectId.isValid(req.params.deviceId);
+    const filter = isObjectId
+      ? { $or: [{ deviceId: req.params.deviceId }, { _id: req.params.deviceId }] }
+      : { deviceId: req.params.deviceId };
 
     // Shopkeepers can only see their own devices
     if (req.user.role === 'shopkeeper') {
