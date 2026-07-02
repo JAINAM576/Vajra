@@ -4,15 +4,42 @@
  * the warning/alert note on the base wallpaper template (without shopkeeper info),
  * and uploads it to Cloudinary as a single generic resource.
  *
- * IMPORTANT: Fonts are embedded as base64 @font-face inside the SVG so that
- * text renders correctly on ANY server (Docker, Render, Railway, etc.)
- * regardless of whether system fonts are installed.
+ * IMPORTANT: To support rendering fonts on all server environments (Docker, Render, etc.)
+ * where system fonts are not installed, we dynamically configure fontconfig to search
+ * our local bundled fonts directory.
  */
 
-const sharp = require('sharp');
-const cloudinary = require('cloudinary').v2;
 const path = require('path');
 const fs = require('fs');
+
+// ─── Setup custom Fontconfig to load local TTF files ─────────────────
+const FONTS_DIR = path.join(__dirname, '..', 'fonts');
+const FONTS_CONF_DIR = FONTS_DIR; // Keep fonts.conf in the fonts directory
+const FONTS_CONF_PATH = path.join(FONTS_CONF_DIR, 'fonts.conf');
+
+try {
+  // Generate fonts.conf dynamically using the absolute path
+  const fontsConfContent = `<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+  <dir prefix="default">${FONTS_DIR}</dir>
+  <cachedir prefix="default">${path.join(FONTS_DIR, '.cache')}</cachedir>
+</fontconfig>`;
+
+  if (!fs.existsSync(FONTS_DIR)) {
+    fs.mkdirSync(FONTS_DIR, { recursive: true });
+  }
+  
+  fs.writeFileSync(FONTS_CONF_PATH, fontsConfContent);
+  process.env.FONTCONFIG_PATH = FONTS_CONF_DIR;
+  console.log(`[AlertImage] Fontconfig configured. FONTCONFIG_PATH set to: ${process.env.FONTCONFIG_PATH}`);
+} catch (err) {
+  console.error('[AlertImage] Failed to configure local fontconfig:', err.message);
+}
+
+// Now load sharp and other dependencies
+const sharp = require('sharp');
+const cloudinary = require('cloudinary').v2;
 
 // Configure Cloudinary
 cloudinary.config({
@@ -23,69 +50,9 @@ cloudinary.config({
 
 const TEMPLATE_PATH = path.join(__dirname, '..', 'images', 'wallpaper_image.jpeg');
 
-// ─── Load and cache font data as base64 at startup ───────────────────
-const FONTS_DIR = path.join(__dirname, '..', 'fonts');
-
-let notoSansBase64 = '';
-let notoSansDevanagariBase64 = '';
-
-try {
-  const notoSansPath = path.join(FONTS_DIR, 'NotoSans-Regular.ttf');
-  if (fs.existsSync(notoSansPath)) {
-    notoSansBase64 = fs.readFileSync(notoSansPath).toString('base64');
-  }
-} catch (err) {
-  console.error('[AlertImage] Error loading NotoSans font:', err.message);
-}
-
-try {
-  const devanagariPath = path.join(FONTS_DIR, 'NotoSansDevanagari-Regular.ttf');
-  if (fs.existsSync(devanagariPath)) {
-    notoSansDevanagariBase64 = fs.readFileSync(devanagariPath).toString('base64');
-  }
-} catch (err) {
-  console.error('[AlertImage] Error loading NotoSansDevanagari font:', err.message);
-}
-
-/**
- * Build the @font-face CSS block that embeds fonts directly into the SVG.
- */
-function buildFontFaceCSS() {
-  let css = '';
-
-  if (notoSansBase64) {
-    css += `
-      @font-face {
-        font-family: 'NotoSans';
-        src: url('data:font/truetype;base64,${notoSansBase64}') format('truetype');
-        font-weight: 100 900;
-        font-style: normal;
-      }
-    `;
-  }
-
-  if (notoSansDevanagariBase64) {
-    css += `
-      @font-face {
-        font-family: 'NotoSansDevanagari';
-        src: url('data:font/truetype;base64,${notoSansDevanagariBase64}') format('truetype');
-        font-weight: 100 900;
-        font-style: normal;
-      }
-    `;
-  }
-
-  return css;
-}
-
 // Font family strings
-const LATIN_FONT = notoSansBase64
-  ? "'NotoSans', Arial, Helvetica, sans-serif"
-  : "Arial, Helvetica, sans-serif";
-
-const HINDI_FONT = notoSansDevanagariBase64
-  ? "'NotoSansDevanagari', 'NotoSans', Arial, Helvetica, sans-serif"
-  : "'NotoSans', Arial, Helvetica, sans-serif";
+const LATIN_FONT = "'Noto Sans', Arial, Helvetica, sans-serif";
+const HINDI_FONT = "'Noto Sans Devanagari', 'Noto Sans', Arial, Helvetica, sans-serif";
 
 /**
  * Wraps text into lines of a maximum length to prevent visual overflow in SVG.
@@ -119,8 +86,6 @@ function buildAlertSvg(alertMessage, width = 900, height = 1600) {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
 
-  const fontFaceCSS = buildFontFaceCSS();
-
   // If a custom message is provided, display it wrapped.
   // Otherwise, display the default bilingual attention warning message.
   if (alertMessage) {
@@ -138,12 +103,6 @@ function buildAlertSvg(alertMessage, width = 900, height = 1600) {
 
     return Buffer.from(`
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
-  <defs>
-    <style type="text/css">
-      ${fontFaceCSS}
-    </style>
-  </defs>
-
   <!-- ═══ ZONE 1: Header ═══ -->
   <text x="50%" y="460" text-anchor="middle"
         font-size="60" font-weight="900" fill="#FFFFFF"
@@ -159,12 +118,6 @@ function buildAlertSvg(alertMessage, width = 900, height = 1600) {
   // Default bilingual EMI attention warning (Standard note layout matched to wallpaper design)
   return Buffer.from(`
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
-  <defs>
-    <style type="text/css">
-      ${fontFaceCSS}
-    </style>
-  </defs>
-
   <!-- ═══ ZONE 1: Above first divider (y=400–740) ═══ -->
   <text x="50%" y="460" text-anchor="middle"
         font-size="60" font-weight="900" fill="#FFFFFF"
