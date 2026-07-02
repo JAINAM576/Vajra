@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LockApp — Admin Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <style>
+        :root {
+            --bg: #0f1117;
+            --bg2: #1a1d27;
+            --bg3: #21242f;
+            --bg4: #2a2d3a;
+            --text: #e8eaed;
+            --text2: #9aa0b0;
+            --muted: #6b7185;
+            --accent: #6366f1;
+            --accent2: #818cf8;
+            --green: #22c55e;
+            --red: #ef4444;
+            --orange: #f59e0b;
+            --blue: #3b82f6;
+            --border: rgba(255,255,255,0.07);
+            --r: 10px;
+        }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+
+        /* NAV */
+        .topnav {
+            background: var(--bg2);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            padding: 0 24px;
+            height: 56px;
+            position: sticky; top: 0; z-index: 100;
+        }
+        .topnav-brand {
+            font-weight: 800; font-size: 1.15em;
+            background: linear-gradient(135deg,#6366f1,#a855f7);
+            -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+            margin-right: 32px;
+        }
+        .topnav-tabs { display:flex; gap:4px; }
+        .topnav-tab {
+            padding: 8px 18px; border-radius: 8px; cursor:pointer;
+            font-size: 0.85em; font-weight: 600; color:var(--text2);
+            transition: all 0.2s; border: none; background: none; font-family:inherit;
+        }
+        .topnav-tab:hover { background:var(--bg3); color:var(--text); }
+        .topnav-tab.active { background:var(--accent); color:white; }
+        .topnav-right {
+            margin-left:auto; display:flex; align-items:center; gap:12px; font-size:0.8em;
+        }
+        .topnav-right input {
+            padding:6px 12px; background:var(--bg3); border:1px solid var(--border);
+            border-radius:6px; color:var(--text); font-family:inherit; font-size:1em; width:220px; outline:none;
+        }
+        .topnav-right input:focus { border-color:var(--accent); }
+
+        /* PAGES */
+        .page { display:none; padding:24px; max-width:1200px; margin:0 auto; }
+        .page.active { display:block; }
+        .page-title { font-size:1.4em; font-weight:800; margin-bottom:20px; }
+
+        /* CARDS */
+        .card {
+            background:var(--bg2); border:1px solid var(--border);
+            border-radius:var(--r); padding:20px; margin-bottom:16px;
+        }
+        .card-title { font-size:1em; font-weight:700; margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid var(--border); }
+
+        /* GRID */
+        .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+        .grid3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; }
+        .grid4 { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+        @media(max-width:800px) { .grid2,.grid3,.grid4 { grid-template-columns:1fr; } }
+
+        /* FORM */
+        .form-group { margin-bottom:12px; }
+        .form-group label { display:block; font-size:0.78em; color:var(--text2); margin-bottom:4px; font-weight:500; }
+        .form-group input, .form-group select, .form-group textarea {
+            width:100%; padding:10px 12px; background:var(--bg3); border:1px solid var(--border);
+            border-radius:8px; color:var(--text); font-family:inherit; font-size:0.9em; outline:none;
+        }
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color:var(--accent); }
+        .form-group textarea { resize:vertical; min-height:60px; }
+
+        /* BUTTONS */
+        .btn {
+            padding:10px 20px; border:none; border-radius:8px; font-family:inherit;
+            font-size:0.85em; font-weight:600; cursor:pointer; transition:all 0.2s;
+        }
+        .btn:hover { transform:translateY(-1px); }
+        .btn-primary { background:var(--accent); color:white; }
+        .btn-primary:hover { background:#5558e6; }
+        .btn-green { background:var(--green); color:white; }
+        .btn-green:hover { background:#1da34e; }
+        .btn-red { background:var(--red); color:white; }
+        .btn-red:hover { background:#d63636; }
+        .btn-orange { background:var(--orange); color:white; }
+        .btn-orange:hover { background:#d98c09; }
+        .btn-sm { padding:6px 14px; font-size:0.78em; }
+        .btn-group { display:flex; gap:8px; flex-wrap:wrap; }
+
+        /* STAT CARDS */
+        .stat-card {
+            background:var(--bg3); border:1px solid var(--border); border-radius:var(--r);
+            padding:16px; text-align:center;
+        }
+        .stat-card .val { font-size:1.8em; font-weight:800; line-height:1; }
+        .stat-card .lbl { font-size:0.7em; color:var(--muted); margin-top:4px; text-transform:uppercase; letter-spacing:0.05em; }
+
+        /* TABLE */
+        .table-wrap { overflow-x:auto; }
+        table { width:100%; border-collapse:collapse; font-size:0.85em; }
+        th { text-align:left; padding:10px 12px; color:var(--muted); font-weight:600; font-size:0.78em; text-transform:uppercase; letter-spacing:0.04em; border-bottom:1px solid var(--border); }
+        td { padding:10px 12px; border-bottom:1px solid var(--border); }
+        tr:hover td { background:var(--bg3); }
+        .badge {
+            display:inline-block; padding:3px 10px; border-radius:20px; font-size:0.75em; font-weight:600;
+        }
+        .badge-green { background:rgba(34,197,94,0.15); color:var(--green); }
+        .badge-red { background:rgba(239,68,68,0.15); color:var(--red); }
+        .badge-orange { background:rgba(245,158,11,0.15); color:var(--orange); }
+        .badge-gray { background:rgba(107,113,133,0.15); color:var(--muted); }
+        .badge-blue { background:rgba(59,130,246,0.15); color:var(--blue); }
+
+        /* RESPONSE */
+        .resp { background:var(--bg3); border-left:3px solid var(--accent); padding:12px; border-radius:0 8px 8px 0; font-family:monospace; font-size:0.8em; max-height:200px; overflow-y:auto; margin-top:12px; white-space:pre-wrap; word-break:break-word; display:none; }
+        .resp.ok { border-left-color:var(--green); }
+        .resp.err { border-left-color:var(--red); }
+
+        /* DEVICE CARD (for devices tab) */
+        .dev-card {
+            background:var(--bg3); border:1px solid var(--border); border-radius:var(--r);
+            padding:16px; cursor:pointer; transition:all 0.2s; position:relative;
+        }
+        .dev-card:hover { border-color:var(--accent); transform:translateY(-2px); box-shadow:0 4px 20px rgba(0,0,0,0.3); }
+        .dev-card.selected { border-color:var(--accent); box-shadow:0 0 0 2px rgba(99,102,241,0.3); }
+        .dev-card .dev-name { font-weight:700; font-size:0.9em; margin-bottom:4px; }
+        .dev-card .dev-shop { font-size:0.75em; color:var(--muted); margin-bottom:8px; }
+        .dev-card .dev-meta { display:flex; gap:10px; font-size:0.75em; color:var(--text2); flex-wrap:wrap; }
+
+        /* MAP PAGE */
+        .map-page { padding:0 !important; max-width:none !important; height:calc(100vh - 56px); display:flex; }
+        .map-page.active { display:flex !important; }
+        .map-sidebar { width:340px; background:var(--bg2); border-right:1px solid var(--border); overflow-y:auto; flex-shrink:0; }
+        .map-sidebar-header { padding:16px 20px; border-bottom:1px solid var(--border); }
+        .map-sidebar-list { padding:8px 12px; }
+        .map-container { flex:1; }
+        #map { width:100%; height:100%; }
+        .map-dev-item {
+            padding:12px 14px; background:var(--bg3); border:1px solid var(--border);
+            border-radius:8px; margin-bottom:8px; cursor:pointer; transition:all 0.2s; font-size:0.85em;
+        }
+        .map-dev-item:hover { border-color:var(--accent); }
+
+        /* Leaflet overrides */
+        .leaflet-popup-content-wrapper { background:var(--bg3)!important; color:var(--text)!important; border-radius:var(--r)!important; border:1px solid var(--border)!important; box-shadow:0 8px 32px rgba(0,0,0,0.5)!important; }
+        .leaflet-popup-tip { background:var(--bg3)!important; }
+        .leaflet-popup-close-button { color:var(--muted)!important; }
+        .popup-row { display:flex; justify-content:space-between; padding:4px 0; font-size:0.82em; border-bottom:1px solid var(--border); }
+        .popup-row:last-child { border:none; }
+
+        /* Empty */
+        .empty { text-align:center; padding:40px 20px; color:var(--muted); }
+        .empty .icon { font-size:2.5em; margin-bottom:8px; opacity:0.3; }
+
+        /* Clickable row */
+        .clickable { cursor:pointer; }
+        .clickable:hover td { background:var(--bg4); }
+
+        @media(max-width:768px) {
+            .map-sidebar { display:none; }
+            .topnav-tabs { overflow-x:auto; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- TOP NAV -->
+<nav class="topnav">
+    <div class="topnav-brand">🔐 LockApp</div>
+    <div class="topnav-tabs">
+        <button class="topnav-tab active" onclick="showPage('shops')">🏪 Shopkeepers</button>
+        <button class="topnav-tab" onclick="showPage('devices')">📱 Devices</button>
+        <button class="topnav-tab" onclick="showPage('tracker')">📍 Tracker</button>
+        <button class="topnav-tab" onclick="showPage('keys')">🔑 Keys</button>
+    </div>
+    <div class="topnav-right">
+        <span style="color:var(--muted)">Server:</span>
+        <input type="text" id="serverUrl" value="http://localhost:3000">
+    </div>
+</nav>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- PAGE 1: SHOPKEEPERS                                    -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="page active" id="page-shops">
+    <div class="page-title">🏪 Shopkeeper Management</div>
+
+    <!-- Stats -->
+    <div class="grid4" id="shopStats" style="margin-bottom:20px;">
+        <div class="stat-card"><div class="val" id="sTotal">0</div><div class="lbl">Total Shops</div></div>
+        <div class="stat-card"><div class="val" style="color:var(--green)" id="sTotalCredits">0</div><div class="lbl">Total Credits</div></div>
+        <div class="stat-card"><div class="val" style="color:var(--blue)" id="sTotalKeys">0</div><div class="lbl">Keys Generated</div></div>
+        <div class="stat-card"><div class="val" style="color:var(--orange)" id="sTotalDevices">0</div><div class="lbl">Active Devices</div></div>
+    </div>
+
+    <div class="grid2">
+        <!-- Create Shop -->
+        <div class="card">
+            <div class="card-title">➕ Create Shopkeeper</div>
+            <div class="form-group"><label>Shop Name</label><input id="newShopName" placeholder="e.g. Apex Mobile Shop"></div>
+            <div class="form-group"><label>Phone</label><input id="newShopPhone" placeholder="e.g. 9898989898"></div>
+            <div class="form-group"><label>Address</label><input id="newShopAddr" placeholder="e.g. Ahmedabad, Gujarat"></div>
+            <button class="btn btn-primary" onclick="createShop()">Create Shopkeeper</button>
+            <div class="resp" id="createShopResp"></div>
+        </div>
+
+        <!-- Add Credits -->
+        <div class="card">
+            <div class="card-title">💰 Add Credits</div>
+            <div class="form-group"><label>Select Shopkeeper</label><select id="creditShopSelect"><option value="">— Select —</option></select></div>
+            <div class="form-group"><label>Credits to Add</label><input type="number" id="creditAmount" value="10" min="1"></div>
+            <button class="btn btn-green" onclick="addCredits()">Add Credits</button>
+            <div class="resp" id="creditResp"></div>
+
+            <div style="margin-top:16px; border-top:1px solid var(--border); padding-top:16px;">
+                <div class="card-title" style="border:none;padding:0;margin-bottom:10px;">🔑 Generate Key</div>
+                <div class="form-group"><label>Select Shopkeeper</label><select id="keyShopSelect"><option value="">— Select —</option></select></div>
+                <button class="btn btn-orange" onclick="generateKey()">Generate Key (1 Credit)</button>
+                <div class="resp" id="keyGenResp"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Shop List -->
+    <div class="card">
+        <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
+            📋 All Shopkeepers
+            <button class="btn btn-sm btn-primary" onclick="loadShops()">⟳ Refresh</button>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Shop Name</th><th>Phone</th><th>Credits</th><th>Keys</th><th>Devices</th><th>Created</th><th>Actions</th></tr></thead>
+                <tbody id="shopTableBody"><tr><td colspan="7" class="empty"><div class="icon">🏪</div>No shopkeepers yet</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- PAGE 2: DEVICES                                        -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="page" id="page-devices">
+    <div class="page-title">📱 Device Management</div>
+
+    <!-- Device Stats -->
+    <div class="grid4" style="margin-bottom:20px;">
+        <div class="stat-card"><div class="val" id="dTotal">0</div><div class="lbl">Total Devices</div></div>
+        <div class="stat-card"><div class="val" style="color:var(--green)" id="dOnline">0</div><div class="lbl">Online</div></div>
+        <div class="stat-card"><div class="val" style="color:var(--red)" id="dLocked">0</div><div class="lbl">Locked</div></div>
+        <div class="stat-card"><div class="val" style="color:var(--orange)" id="dAvgBat">—</div><div class="lbl">Avg Battery</div></div>
+    </div>
+
+    <div class="grid2">
+        <!-- Device List -->
+        <div class="card">
+            <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
+                📋 Devices
+                <button class="btn btn-sm btn-primary" onclick="loadDevices()">⟳ Refresh</button>
+            </div>
+            <div class="form-group"><input id="devSearch" placeholder="🔍 Search by model, shop, ID..." oninput="filterDevs()"></div>
+            <div id="deviceListContainer">
+                <div class="empty"><div class="icon">📱</div>No devices. Activate one first.</div>
+            </div>
+        </div>
+
+        <!-- Device Controls -->
+        <div class="card">
+            <div class="card-title">🎮 Device Control</div>
+            <div class="form-group"><label>Selected Device ID</label><input id="ctrlDeviceId" placeholder="Click a device from the list" readonly style="cursor:pointer;"></div>
+            <div id="ctrlDeviceInfo" style="font-size:0.8em; color:var(--text2); margin-bottom:14px;"></div>
+
+            <div style="margin-bottom:10px; font-size:0.78em; color:var(--muted); text-transform:uppercase; font-weight:600;">Lock / Unlock</div>
+            <div class="grid2" style="margin-bottom:12px;">
+                <div class="form-group"><label>EMI Amount</label><input type="number" id="ctrlEmi" placeholder="e.g. 1500"></div>
+                <div class="form-group"><label>Due Date</label><input id="ctrlDue" placeholder="e.g. 2026-06-30"></div>
+            </div>
+            <div class="btn-group" style="margin-bottom:16px;">
+                <button class="btn btn-red" onclick="sendCmd('lock')">🔒 Lock</button>
+                <button class="btn btn-green" onclick="sendCmd('unlock')">🔓 Unlock</button>
+            </div>
+
+            <div style="margin-bottom:10px; font-size:0.78em; color:var(--muted); text-transform:uppercase; font-weight:600;">Controls</div>
+            <div class="btn-group" style="margin-bottom:8px;">
+                <button class="btn btn-sm btn-orange" onclick="sendCmd('camera-off')">📷 Cam OFF</button>
+                <button class="btn btn-sm btn-green" onclick="sendCmd('camera-on')">📷 Cam ON</button>
+                <button class="btn btn-sm btn-orange" onclick="sendCmd('mute')">🔇 Mute</button>
+                <button class="btn btn-sm btn-green" onclick="sendCmd('unmute')">🔊 Unmute</button>
+            </div>
+            <div class="btn-group" style="margin-bottom:8px;">
+                <button class="btn btn-sm btn-orange" onclick="sendCmd('mic-off')">🎤 Mic OFF</button>
+                <button class="btn btn-sm btn-green" onclick="sendCmd('mic-on')">🎤 Mic ON</button>
+                <button class="btn btn-sm btn-red" onclick="sendCmd('usb-block')">🔌 Block USB</button>
+                <button class="btn btn-sm btn-green" onclick="sendCmd('usb-unblock')">🔌 Unblock</button>
+            </div>
+            <div class="btn-group" style="margin-bottom:8px;">
+                <button class="btn btn-sm btn-red" onclick="sendCmd('hide-icon')">🙈 Hide Icon</button>
+                <button class="btn btn-sm btn-green" onclick="sendCmd('show-icon')">👁️ Show Icon</button>
+            </div>
+
+            <div style="margin-top:14px; border-top:1px solid var(--border); padding-top:14px;">
+                <div class="form-group"><label>Set PIN (min 4 digits)</label><input id="ctrlPin" placeholder="e.g. 1234" value="1234"></div>
+                <div class="btn-group" style="margin-bottom:12px;">
+                    <button class="btn btn-sm btn-orange" onclick="sendCmd('set-pin')">🔑 Set PIN</button>
+                    <button class="btn btn-sm btn-green" onclick="sendCmd('clear-pin')">❌ Clear PIN</button>
+                </div>
+            </div>
+
+            <div style="border-top:1px solid var(--border); padding-top:14px;">
+                <div class="form-group"><label>🚨 Alert Message</label><textarea id="ctrlAlert" placeholder="Pay your EMI now...">Please pay your EMI. Contact shop immediately.</textarea></div>
+                <button class="btn btn-red" onclick="sendCmd('alert')" style="margin-bottom:12px;">🚨 Send Alert</button>
+            </div>
+
+            <div class="resp" id="cmdResp"></div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- PAGE 3: TRACKER (MAP)                                  -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="page map-page" id="page-tracker">
+    <div class="map-sidebar">
+        <div class="map-sidebar-header">
+            <div style="font-weight:700; margin-bottom:4px;">📍 Device Locations</div>
+            <button class="btn btn-sm btn-primary" onclick="loadMapDevices()" style="width:100%;">⟳ Refresh Locations</button>
+        </div>
+        <div class="map-sidebar-list" id="mapDeviceList">
+            <div class="empty"><div class="icon">📡</div>Click refresh to load</div>
+        </div>
+    </div>
+    <div class="map-container"><div id="map"></div></div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- PAGE 4: KEYS                                           -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="page" id="page-keys">
+    <div class="page-title">🔑 Activation Keys</div>
+
+    <div class="grid4" style="margin-bottom:20px;">
+        <div class="stat-card"><div class="val" id="kTotal">0</div><div class="lbl">Total Keys</div></div>
+        <div class="stat-card"><div class="val" style="color:var(--green)" id="kAvail">0</div><div class="lbl">Available</div></div>
+        <div class="stat-card"><div class="val" style="color:var(--orange)" id="kUsed">0</div><div class="lbl">Used</div></div>
+        <div class="stat-card"><div class="val" style="color:var(--blue)" id="kShops">0</div><div class="lbl">Shops</div></div>
+    </div>
+
+    <div class="card">
+        <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
+            📋 All Keys
+            <button class="btn btn-sm btn-primary" onclick="loadKeys()">⟳ Refresh</button>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Key</th><th>Shop</th><th>Status</th><th>Created</th></tr></thead>
+                <tbody id="keyTableBody"><tr><td colspan="4" class="empty"><div class="icon">🔑</div>No keys</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- LEAFLET JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════
+let shops = [], devices = [], keys = [], mapDevices = [];
+let map = null, markers = {};
+let selectedDeviceId = null;
+
+function S() { return document.getElementById('serverUrl').value.replace(/\/$/,'') || 'http://localhost:3000'; }
+
+// ═══════════════════════════════════════════════════════════
+// NAV
+// ═══════════════════════════════════════════════════════════
+function showPage(name) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.topnav-tab').forEach(t => t.classList.remove('active'));
+    document.getElementById('page-' + name).classList.add('active');
+    event.target.classList.add('active');
+
+    if (name === 'shops') loadShops();
+    if (name === 'devices') loadDevices();
+    if (name === 'keys') loadKeys();
+    if (name === 'tracker') { initMap(); loadMapDevices(); }
+}
+
+// ═══════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════
+function showResp(id, data, ok = true) {
+    const el = document.getElementById(id);
+    el.textContent = JSON.stringify(data, null, 2);
+    el.className = 'resp ' + (ok ? 'ok' : 'err');
+    el.style.display = 'block';
+}
+async function api(method, path, body) {
+    const opts = { method, headers: { 'Content-Type': 'application/json' } };
+    if (body) opts.body = JSON.stringify(body);
+    const res = await fetch(S() + path, opts);
+    return res.json();
+}
+function timeAgo(d) {
+    if (!d) return 'never';
+    const ms = Date.now() - new Date(d).getTime();
+    const m = Math.floor(ms / 60000);
+    if (m < 1) return 'just now';
+    if (m < 60) return m + 'm ago';
+    if (m < 1440) return Math.floor(m / 60) + 'h ago';
+    return Math.floor(m / 1440) + 'd ago';
+}
+
+// ═══════════════════════════════════════════════════════════
+// SHOPS
+// ═══════════════════════════════════════════════════════════
+async function loadShops() {
+    try {
+        const data = await api('GET', '/api/shop/list');
+        if (!data.success) return;
+        shops = data.shops;
+
+        // Stats
+        document.getElementById('sTotal').textContent = shops.length;
+        document.getElementById('sTotalCredits').textContent = shops.reduce((a, s) => a + s.credits, 0);
+        document.getElementById('sTotalKeys').textContent = shops.reduce((a, s) => a + s.totalKeysGenerated, 0);
+        document.getElementById('sTotalDevices').textContent = shops.reduce((a, s) => a + (s.activeDevices || 0), 0);
+
+        // Dropdowns
+        const opts = '<option value="">— Select —</option>' + shops.map(s =>
+            `<option value="${s.shopId}">${s.shopName} (₹${s.credits} credits)</option>`
+        ).join('');
+        document.getElementById('creditShopSelect').innerHTML = opts;
+        document.getElementById('keyShopSelect').innerHTML = opts;
+
+        // Table
+        if (shops.length === 0) {
+            document.getElementById('shopTableBody').innerHTML = '<tr><td colspan="7" class="empty"><div class="icon">🏪</div>No shopkeepers yet. Create one above.</td></tr>';
+            return;
+        }
+        document.getElementById('shopTableBody').innerHTML = shops.map(s => `
+            <tr>
+                <td><strong>${s.shopName}</strong><br><span style="font-size:0.75em;color:var(--muted)">${s.address || ''}</span></td>
+                <td>${s.shopPhone}</td>
+                <td><span class="badge ${s.credits > 0 ? 'badge-green' : 'badge-red'}">${s.credits} credits</span></td>
+                <td>${s.totalKeys || 0}</td>
+                <td>${s.activeDevices || 0}</td>
+                <td style="font-size:0.8em;color:var(--muted)">${timeAgo(s.createdAt)}</td>
+                <td>
+                    <button class="btn btn-sm btn-green" onclick="quickCredit('${s.shopId}')">+5 💰</button>
+                    <button class="btn btn-sm btn-orange" onclick="quickKey('${s.shopId}')">🔑 Key</button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (e) { console.error(e); }
+}
+
+async function createShop() {
+    const name = document.getElementById('newShopName').value.trim();
+    const phone = document.getElementById('newShopPhone').value.trim();
+    const addr = document.getElementById('newShopAddr').value.trim();
+    if (!name || !phone) return showResp('createShopResp', { error: 'Name and phone required' }, false);
+    try {
+        const data = await api('POST', '/api/shop/create', { shopName: name, shopPhone: phone, address: addr });
+        showResp('createShopResp', data, data.success);
+        if (data.success) { document.getElementById('newShopName').value=''; document.getElementById('newShopPhone').value=''; document.getElementById('newShopAddr').value=''; loadShops(); }
+    } catch (e) { showResp('createShopResp', { error: e.message }, false); }
+}
+
+async function addCredits() {
+    const shopId = document.getElementById('creditShopSelect').value;
+    const amount = parseInt(document.getElementById('creditAmount').value);
+    if (!shopId) return showResp('creditResp', { error: 'Select a shopkeeper' }, false);
+    if (!amount || amount <= 0) return showResp('creditResp', { error: 'Enter valid amount' }, false);
+    try {
+        const data = await api('POST', `/api/shop/${shopId}/credits`, { amount });
+        showResp('creditResp', data, data.success);
+        if (data.success) loadShops();
+    } catch (e) { showResp('creditResp', { error: e.message }, false); }
+}
+
+async function generateKey() {
+    const shopId = document.getElementById('keyShopSelect').value;
+    if (!shopId) return showResp('keyGenResp', { error: 'Select a shopkeeper' }, false);
+    try {
+        const data = await api('POST', `/api/shop/${shopId}/generate-key`);
+        showResp('keyGenResp', data, data.success);
+        if (data.success) loadShops();
+    } catch (e) { showResp('keyGenResp', { error: e.message }, false); }
+}
+
+async function quickCredit(shopId) {
+    await api('POST', `/api/shop/${shopId}/credits`, { amount: 5 });
+    loadShops();
+}
+async function quickKey(shopId) {
+    const data = await api('POST', `/api/shop/${shopId}/generate-key`);
+    if (!data.success) alert(data.message);
+    loadShops();
+}
+
+// ═══════════════════════════════════════════════════════════
+// DEVICES
+// ═══════════════════════════════════════════════════════════
+async function loadDevices() {
+    try {
+        const data = await api('GET', '/api/device/locations');
+        if (!data.success) return;
+        devices = data.devices;
+
+        // Stats
+        document.getElementById('dTotal').textContent = devices.length;
+        document.getElementById('dOnline').textContent = devices.filter(d => d.isOnline).length;
+        document.getElementById('dLocked').textContent = devices.filter(d => d.isLocked).length;
+        const avg = devices.length > 0 ? Math.round(devices.reduce((a,d) => a + d.batteryLevel, 0) / devices.length) : 0;
+        document.getElementById('dAvgBat').textContent = devices.length > 0 ? avg + '%' : '—';
+
+        renderDeviceList(devices);
+    } catch (e) { console.error(e); }
+}
+
+function renderDeviceList(list) {
+    const c = document.getElementById('deviceListContainer');
+    if (list.length === 0) {
+        c.innerHTML = '<div class="empty"><div class="icon">📱</div>No devices found.</div>';
+        return;
+    }
+    c.innerHTML = list.map(d => {
+        const batColor = d.batteryLevel > 50 ? 'var(--green)' : d.batteryLevel > 20 ? 'var(--orange)' : 'var(--red)';
+        const statusBadge = d.isLocked ? '<span class="badge badge-red">🔒 Locked</span>' :
+                            d.isOnline ? '<span class="badge badge-green">● Online</span>' :
+                            '<span class="badge badge-gray">○ Offline</span>';
+        return `
+            <div class="dev-card ${d.deviceId === selectedDeviceId ? 'selected' : ''}" onclick="selectDev('${d.deviceId}')">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <div class="dev-name">${d.deviceModel}</div>
+                    ${statusBadge}
+                </div>
+                <div class="dev-shop">🏪 ${d.shopName} &nbsp;|&nbsp; 🕐 ${d.lastSeenAgo}</div>
+                <div class="dev-meta">
+                    <span style="color:${batColor}">🔋 ${d.batteryLevel}%${d.isCharging ? '⚡' : ''}</span>
+                    <span>📡 ${d.networkType}</span>
+                    <span>Android ${d.androidVersion || '?'}</span>
+                </div>
+            </div>`;
+    }).join('');
+}
+
+function filterDevs() {
+    const q = document.getElementById('devSearch').value.toLowerCase();
+    const filtered = devices.filter(d =>
+        d.deviceModel.toLowerCase().includes(q) || d.shopName.toLowerCase().includes(q) || d.deviceId.toLowerCase().includes(q)
+    );
+    renderDeviceList(filtered);
+}
+
+function selectDev(id) {
+    selectedDeviceId = id;
+    const d = devices.find(x => x.deviceId === id);
+    document.getElementById('ctrlDeviceId').value = id;
+    document.getElementById('ctrlDeviceInfo').innerHTML = d ?
+        `<strong>${d.deviceModel}</strong> · 🏪 ${d.shopName} · 🔋 ${d.batteryLevel}% · ${d.isLocked ? '🔒 Locked' : '🔓 Unlocked'}` : '';
+    document.querySelectorAll('.dev-card').forEach(c => c.classList.remove('selected'));
+    event.currentTarget.classList.add('selected');
+}
+
+async function sendCmd(cmd) {
+    const id = document.getElementById('ctrlDeviceId').value;
+    if (!id) return showResp('cmdResp', { error: 'Select a device first' }, false);
+    try {
+        let data;
+        switch (cmd) {
+            case 'lock': {
+                const body = {};
+                const emi = document.getElementById('ctrlEmi').value;
+                const due = document.getElementById('ctrlDue').value;
+                if (emi) body.emi_amount = parseFloat(emi);
+                if (due) body.emi_due_date = due;
+                data = await api('POST', `/api/device/lock/${id}`, body);
+                break;
+            }
+            case 'unlock': data = await api('POST', `/api/device/unlock/${id}`, {}); break;
+            case 'camera-off': data = await api('POST', `/api/device/camera/${id}`, { action: 'disable' }); break;
+            case 'camera-on': data = await api('POST', `/api/device/camera/${id}`, { action: 'enable' }); break;
+            case 'mute': data = await api('POST', `/api/device/volume/${id}`, { action: 'mute' }); break;
+            case 'unmute': data = await api('POST', `/api/device/volume/${id}`, { action: 'unmute' }); break;
+            case 'mic-off': data = await api('POST', `/api/device/mic/${id}`, { action: 'mute' }); break;
+            case 'mic-on': data = await api('POST', `/api/device/mic/${id}`, { action: 'unmute' }); break;
+            case 'usb-block': data = await api('POST', `/api/device/usb/${id}`, { action: 'block' }); break;
+            case 'usb-unblock': data = await api('POST', `/api/device/usb/${id}`, { action: 'unblock' }); break;
+            case 'hide-icon': data = await api('POST', `/api/device/app-visibility/${id}`, { action: 'hide' }); break;
+            case 'show-icon': data = await api('POST', `/api/device/app-visibility/${id}`, { action: 'show' }); break;
+            case 'set-pin': {
+                const pin = document.getElementById('ctrlPin').value;
+                data = await api('POST', `/api/device/password/${id}`, { action: 'set', pin });
+                break;
+            }
+            case 'clear-pin': data = await api('POST', `/api/device/password/${id}`, { action: 'clear' }); break;
+            case 'alert': {
+                const msg = document.getElementById('ctrlAlert').value;
+                data = await api('POST', `/api/device/alert/${id}`, { message: msg });
+                break;
+            }
+        }
+        showResp('cmdResp', data, data.success);
+        setTimeout(() => loadDevices(), 500);
+    } catch (e) { showResp('cmdResp', { error: e.message }, false); }
+}
+
+// ═══════════════════════════════════════════════════════════
+// TRACKER (MAP)
+// ═══════════════════════════════════════════════════════════
+function initMap() {
+    if (map) return;
+    map = L.map('map', { center: [22.5, 78.9], zoom: 5, zoomControl: false });
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OSM &copy; CARTO', subdomains: 'abcd', maxZoom: 19
+    }).addTo(map);
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+}
+
+function mkIcon(d) {
+    const c = d.isLocked ? '#ef4444' : d.isOnline ? '#22c55e' : '#6b7185';
+    const e = d.isLocked ? '🔒' : '📱';
+    const bc = d.batteryLevel > 50 ? '#22c55e' : d.batteryLevel > 20 ? '#f59e0b' : '#ef4444';
+    return L.divIcon({
+        className: '', iconSize: [40, 48], iconAnchor: [20, 48], popupAnchor: [0, -48],
+        html: `<div style="position:relative;width:40px;height:40px;display:flex;align-items:center;justify-content:center;">
+            <div style="position:absolute;inset:0;background:${c};border-radius:50% 50% 50% 0;transform:rotate(-45deg);opacity:0.9;box-shadow:0 3px 12px ${c}66;"></div>
+            <span style="position:relative;z-index:1;font-size:16px;">${e}</span>
+            <div style="position:absolute;bottom:-4px;left:50%;transform:translateX(-50%);background:${bc};color:white;font-size:9px;font-weight:700;padding:1px 5px;border-radius:8px;font-family:Inter,sans-serif;">${d.batteryLevel}%</div>
+        </div>`
+    });
+}
+
+async function loadMapDevices() {
+    try {
+        const data = await api('GET', '/api/device/locations');
+        if (!data.success) return;
+        mapDevices = data.devices;
+
+        // Clear old markers
+        Object.values(markers).forEach(m => map.removeLayer(m));
+        markers = {};
+
+        const valid = mapDevices.filter(d => d.lat !== 0 || d.lng !== 0);
+
+        // Sidebar
+        const list = document.getElementById('mapDeviceList');
+        if (mapDevices.length === 0) {
+            list.innerHTML = '<div class="empty"><div class="icon">📡</div>No devices</div>';
+        } else {
+            list.innerHTML = mapDevices.map(d => {
+                const noGps = d.lat === 0 && d.lng === 0;
+                const status = d.isLocked ? '🔒' : d.isOnline ? '🟢' : '⚫';
+                return `<div class="map-dev-item" onclick="flyToDev('${d.deviceId}')">
+                    <div style="font-weight:600;">${status} ${d.deviceModel}</div>
+                    <div style="font-size:0.78em;color:var(--muted);">🏪 ${d.shopName} · 🔋 ${d.batteryLevel}% · ${d.lastSeenAgo}${noGps ? ' · ⚠️ No GPS' : ''}</div>
+                </div>`;
+            }).join('');
+        }
+
+        // Markers
+        valid.forEach(d => {
+            const m = L.marker([d.lat, d.lng], { icon: mkIcon(d) }).addTo(map);
+            m.bindPopup(`<div style="min-width:200px;">
+                <div style="font-weight:700;margin-bottom:4px;">${d.deviceModel}</div>
+                <div style="font-size:0.78em;color:var(--muted);margin-bottom:8px;">🏪 ${d.shopName}</div>
+                <div class="popup-row"><span style="color:var(--muted)">Status</span><span style="font-weight:600;color:${d.isLocked ? 'var(--red)' : d.isOnline ? 'var(--green)' : 'var(--muted)'}">${d.isLocked ? 'LOCKED' : d.isOnline ? 'ONLINE' : 'OFFLINE'}</span></div>
+                <div class="popup-row"><span style="color:var(--muted)">Battery</span><span style="font-weight:600">${d.batteryLevel}%${d.isCharging ? '⚡' : ''}</span></div>
+                <div class="popup-row"><span style="color:var(--muted)">Network</span><span style="font-weight:600">${d.networkType}</span></div>
+                <div class="popup-row"><span style="color:var(--muted)">Last Seen</span><span style="font-weight:600">${d.lastSeenAgo}</span></div>
+                <div class="popup-row"><span style="color:var(--muted)">Coords</span><span style="font-weight:600;font-size:0.8em">${d.lat.toFixed(4)}, ${d.lng.toFixed(4)}</span></div>
+            </div>`);
+            markers[d.deviceId] = m;
+        });
+
+        if (valid.length > 0) {
+            map.fitBounds(L.latLngBounds(valid.map(d => [d.lat, d.lng])), { padding: [60, 60], maxZoom: 14 });
+        }
+    } catch (e) { console.error(e); }
+}
+
+function flyToDev(id) {
+    const d = mapDevices.find(x => x.deviceId === id);
+    if (!d || (d.lat === 0 && d.lng === 0)) return;
+    map.flyTo([d.lat, d.lng], 16, { duration: 0.8 });
+    if (markers[id]) markers[id].openPopup();
+}
+
+// ═══════════════════════════════════════════════════════════
+// KEYS
+// ═══════════════════════════════════════════════════════════
+async function loadKeys() {
+    try {
+        const data = await api('GET', '/api/keys/list');
+        if (!data.success) return;
+        keys = data.keys;
+
+        const avail = keys.filter(k => !k.isUsed).length;
+        const used = keys.filter(k => k.isUsed).length;
+        const uniqueShops = new Set(keys.map(k => k.shopName)).size;
+        document.getElementById('kTotal').textContent = keys.length;
+        document.getElementById('kAvail').textContent = avail;
+        document.getElementById('kUsed').textContent = used;
+        document.getElementById('kShops').textContent = uniqueShops;
+
+        if (keys.length === 0) {
+            document.getElementById('keyTableBody').innerHTML = '<tr><td colspan="4" class="empty"><div class="icon">🔑</div>No keys yet</td></tr>';
+            return;
+        }
+        document.getElementById('keyTableBody').innerHTML = keys.map(k => `
+            <tr>
+                <td><code style="background:var(--bg);padding:2px 8px;border-radius:4px;font-size:0.85em;">${k.key}</code></td>
+                <td>${k.shopName || '—'}</td>
+                <td>${k.isUsed ? '<span class="badge badge-orange">Used</span>' : '<span class="badge badge-green">Available</span>'}</td>
+                <td style="font-size:0.8em;color:var(--muted)">${timeAgo(k.createdAt)}</td>
+            </tr>
+        `).join('');
+    } catch (e) { console.error(e); }
+}
+
+// ═══════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════
+window.addEventListener('DOMContentLoaded', () => {
+    if (window.location.protocol.startsWith('http')) {
+        document.getElementById('serverUrl').value = window.location.origin;
+    }
+    loadShops();
+});
+</script>
+</body>
+</html>

@@ -44,7 +44,13 @@ const applyTagToDevice = async (deviceId, commandId, inputValue) => {
   const mapping = COMMAND_TAG_MAP[commandId];
   if (!mapping) return;
 
-  const device = await Device.findOne({ deviceId });
+  const mongoose = require('mongoose');
+  const isObjectId = mongoose.Types.ObjectId.isValid(deviceId);
+  const query = isObjectId
+    ? { $or: [{ deviceId }, { _id: deviceId }] }
+    : { deviceId };
+
+  const device = await Device.findOne(query);
   if (!device) return;
 
   const tags = device.appliedTags || {};
@@ -120,7 +126,12 @@ router.post('/:deviceId/send', authorizeRoles('shopkeeper', 'super_admin', 'supp
     }
 
     // Verify device exists and belongs to shopkeeper (if role is shopkeeper)
-    const query = { deviceId: req.params.deviceId };
+    const mongoose = require('mongoose');
+    const isObjectId = mongoose.Types.ObjectId.isValid(req.params.deviceId);
+    const query = isObjectId
+      ? { $or: [{ deviceId: req.params.deviceId }, { _id: req.params.deviceId }] }
+      : { deviceId: req.params.deviceId };
+
     if (req.user.role === 'shopkeeper') {
       query.shopkeeperId = req.user.id;
     }
@@ -163,10 +174,25 @@ router.post('/:deviceId/send', authorizeRoles('shopkeeper', 'super_admin', 'supp
       
       // Map frontend command properties to fields the Kotlin CommandHandler expects
       if (inputValue) {
-        if (commandId === 'set_pin') extraData.pin = String(inputValue);
-        else if (commandId === 'alert') extraData.message = String(inputValue);
-        else if (commandId === 'wallpaper') extraData.url = String(inputValue);
-        else extraData.value = String(inputValue);
+        if (commandId === 'set_pin') {
+          extraData.pin = String(inputValue);
+          extraData.value = String(inputValue);
+        } else if (commandId === 'alert') {
+          extraData.alert_message = String(inputValue);
+          extraData.message = String(inputValue);
+          extraData.value = String(inputValue);
+        } else if (commandId === 'wallpaper') {
+          extraData.wallpaper_url = String(inputValue);
+          extraData.url = String(inputValue);
+          extraData.value = String(inputValue);
+        } else {
+          extraData.value = String(inputValue);
+        }
+      }
+
+      if (commandId === 'lock') {
+        extraData.emi_amount = device.emiAmount ? String(device.emiAmount) : '';
+        extraData.emi_due_date = device.emiDueDate ? new Date(device.emiDueDate).toISOString().split('T')[0] : '';
       }
 
       const SHORT_CMD_MAP = {
@@ -333,7 +359,12 @@ router.get('/:deviceId/logs', async (req, res) => {
     const skip = (page - 1) * limit;
 
     // Verify device exists and belongs to shopkeeper (if role is shopkeeper)
-    const deviceQuery = { deviceId: req.params.deviceId };
+    const mongoose = require('mongoose');
+    const isObjectId = mongoose.Types.ObjectId.isValid(req.params.deviceId);
+    const deviceQuery = isObjectId
+      ? { $or: [{ deviceId: req.params.deviceId }, { _id: req.params.deviceId }] }
+      : { deviceId: req.params.deviceId };
+
     if (req.user.role === 'shopkeeper') {
       deviceQuery.shopkeeperId = req.user.id;
     }
