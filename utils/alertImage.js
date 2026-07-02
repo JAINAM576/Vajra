@@ -3,6 +3,10 @@
  * Generates a single, generic full-screen alert image by overlaying
  * the warning/alert note on the base wallpaper template (without shopkeeper info),
  * and uploads it to Cloudinary as a single generic resource.
+ *
+ * IMPORTANT: Fonts are embedded as base64 @font-face inside the SVG so that
+ * text renders correctly on ANY server (Docker, Render, Railway, etc.)
+ * regardless of whether system fonts are installed.
  */
 
 const sharp = require('sharp');
@@ -18,6 +22,70 @@ cloudinary.config({
 });
 
 const TEMPLATE_PATH = path.join(__dirname, '..', 'images', 'wallpaper_image.jpeg');
+
+// ─── Load and cache font data as base64 at startup ───────────────────
+const FONTS_DIR = path.join(__dirname, '..', 'fonts');
+
+let notoSansBase64 = '';
+let notoSansDevanagariBase64 = '';
+
+try {
+  const notoSansPath = path.join(FONTS_DIR, 'NotoSans-Regular.ttf');
+  if (fs.existsSync(notoSansPath)) {
+    notoSansBase64 = fs.readFileSync(notoSansPath).toString('base64');
+  }
+} catch (err) {
+  console.error('[AlertImage] Error loading NotoSans font:', err.message);
+}
+
+try {
+  const devanagariPath = path.join(FONTS_DIR, 'NotoSansDevanagari-Regular.ttf');
+  if (fs.existsSync(devanagariPath)) {
+    notoSansDevanagariBase64 = fs.readFileSync(devanagariPath).toString('base64');
+  }
+} catch (err) {
+  console.error('[AlertImage] Error loading NotoSansDevanagari font:', err.message);
+}
+
+/**
+ * Build the @font-face CSS block that embeds fonts directly into the SVG.
+ */
+function buildFontFaceCSS() {
+  let css = '';
+
+  if (notoSansBase64) {
+    css += `
+      @font-face {
+        font-family: 'NotoSans';
+        src: url('data:font/truetype;base64,${notoSansBase64}') format('truetype');
+        font-weight: 100 900;
+        font-style: normal;
+      }
+    `;
+  }
+
+  if (notoSansDevanagariBase64) {
+    css += `
+      @font-face {
+        font-family: 'NotoSansDevanagari';
+        src: url('data:font/truetype;base64,${notoSansDevanagariBase64}') format('truetype');
+        font-weight: 100 900;
+        font-style: normal;
+      }
+    `;
+  }
+
+  return css;
+}
+
+// Font family strings
+const LATIN_FONT = notoSansBase64
+  ? "'NotoSans', Arial, Helvetica, sans-serif"
+  : "Arial, Helvetica, sans-serif";
+
+const HINDI_FONT = notoSansDevanagariBase64
+  ? "'NotoSansDevanagari', 'NotoSans', Arial, Helvetica, sans-serif"
+  : "'NotoSans', Arial, Helvetica, sans-serif";
 
 /**
  * Wraps text into lines of a maximum length to prevent visual overflow in SVG.
@@ -51,6 +119,8 @@ function buildAlertSvg(alertMessage, width = 900, height = 1600) {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
 
+  const fontFaceCSS = buildFontFaceCSS();
+
   // If a custom message is provided, display it wrapped.
   // Otherwise, display the default bilingual attention warning message.
   if (alertMessage) {
@@ -62,16 +132,22 @@ function buildAlertSvg(alertMessage, width = 900, height = 1600) {
         const y = messageStartLineY + index * lineSpacing;
         return `<text x="50%" y="${y}" text-anchor="middle"
               font-size="34" font-weight="600" fill="rgba(255,255,255,0.95)"
-              font-family="Arial, Helvetica, sans-serif">${line}</text>`;
+              font-family="${LATIN_FONT}">${line}</text>`;
       })
       .join('\n');
 
     return Buffer.from(`
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+  <defs>
+    <style type="text/css">
+      ${fontFaceCSS}
+    </style>
+  </defs>
+
   <!-- ═══ ZONE 1: Header ═══ -->
   <text x="50%" y="460" text-anchor="middle"
         font-size="60" font-weight="900" fill="#FFFFFF"
-        font-family="Arial, Helvetica, sans-serif"
+        font-family="${LATIN_FONT}"
         letter-spacing="8" text-decoration="underline">ATTENTION</text>
 
   <!-- ═══ ZONE 2: Custom Alert Message ═══ -->
@@ -83,40 +159,46 @@ function buildAlertSvg(alertMessage, width = 900, height = 1600) {
   // Default bilingual EMI attention warning (Standard note layout matched to wallpaper design)
   return Buffer.from(`
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+  <defs>
+    <style type="text/css">
+      ${fontFaceCSS}
+    </style>
+  </defs>
+
   <!-- ═══ ZONE 1: Above first divider (y=400–740) ═══ -->
   <text x="50%" y="460" text-anchor="middle"
         font-size="60" font-weight="900" fill="#FFFFFF"
-        font-family="Arial, Helvetica, sans-serif"
+        font-family="${LATIN_FONT}"
         letter-spacing="8" text-decoration="underline">ATTENTION</text>
 
   <text x="50%" y="540" text-anchor="middle"
         font-size="33" font-weight="400" fill="rgba(255,255,255,0.92)"
-        font-family="Arial, Helvetica, sans-serif">Dear Customer,</text>
+        font-family="${LATIN_FONT}">Dear Customer,</text>
 
   <text x="50%" y="590" text-anchor="middle"
         font-size="33" font-weight="400" fill="rgba(255,255,255,0.92)"
-        font-family="Arial, Helvetica, sans-serif">Kindly pay your EMI before Due</text>
+        font-family="${LATIN_FONT}">Kindly pay your EMI before Due</text>
 
   <text x="50%" y="640" text-anchor="middle"
         font-size="33" font-weight="400" fill="rgba(255,255,255,0.92)"
-        font-family="Arial, Helvetica, sans-serif">date to avoid locking of your</text>
+        font-family="${LATIN_FONT}">date to avoid locking of your</text>
 
   <text x="50%" y="690" text-anchor="middle"
         font-size="33" font-weight="400" fill="rgba(255,255,255,0.92)"
-        font-family="Arial, Helvetica, sans-serif">device.</text>
+        font-family="${LATIN_FONT}">device.</text>
 
   <!-- ═══ ZONE 2: Between dividers (y=820–1080) ═══ -->
   <text x="50%" y="910" text-anchor="middle"
         font-size="34" font-weight="600" fill="rgba(255,255,255,0.88)"
-        font-family="Arial, Helvetica, sans-serif">कृपया अपने डिवाइस को लॉक होने से</text>
+        font-family="${HINDI_FONT}">कृपया अपने डिवाइस को लॉक होने से</text>
 
   <text x="50%" y="970" text-anchor="middle"
         font-size="34" font-weight="600" fill="rgba(255,255,255,0.88)"
-        font-family="Arial, Helvetica, sans-serif">बचाने के लिए नियत तारीख से पहले</text>
+        font-family="${HINDI_FONT}">बचाने के लिए नियत तारीख से पहले</text>
 
   <text x="50%" y="1030" text-anchor="middle"
         font-size="34" font-weight="600" fill="rgba(255,255,255,0.88)"
-        font-family="Arial, Helvetica, sans-serif">अपनी किस्त का भुगतान करें।</text>
+        font-family="${HINDI_FONT}">अपनी किस्त का भुगतान करें।</text>
 </svg>
   `.trim());
 }
