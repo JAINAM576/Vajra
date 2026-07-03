@@ -4,6 +4,9 @@ const router = express.Router();
 const Device = require('../models/Device');
 const ActivationKey = require('../models/ActivationKey');
 const Shopkeeper = require('../models/Shopkeeper');
+const CommandLog = require('../models/CommandLog');
+const Ticket = require('../models/Ticket');
+const { applyTagToDevice } = require('./commands');
 
 // ─── POST /api/device/activate — Client app device activation ─────────
 router.post('/activate', async (req, res) => {
@@ -263,6 +266,110 @@ router.post('/info', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Server error updating device specifications.',
+    });
+  }
+});
+
+// ─── POST /api/device/command-status — Update command status from client ─────────
+router.post('/command-status', async (req, res) => {
+  try {
+    const { deviceId, logId, status, errorReason } = req.body;
+
+    console.log(`\n📡 Command status update from device ${deviceId}: logId=${logId}, status=${status}`);
+
+    if (!deviceId || !logId || !status) {
+      return res.status(400).json({
+        success: false,
+        message: 'deviceId, logId, and status are required.',
+      });
+    }
+
+    const commandLog = await CommandLog.findById(logId);
+    if (!commandLog) {
+      return res.status(404).json({
+        success: false,
+        message: 'Command log not found.',
+      });
+    }
+
+    // Verify the command log belongs to this device
+    const device = await Device.findById(commandLog.deviceId);
+    if (!device || device.deviceId !== deviceId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: Command does not match device.',
+      });
+    }
+
+    const validStatuses = ['sent', 'delivered', 'executed', 'failed', 'pending'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid status. Must be one of: ${validStatuses.join(', ')}`,
+      });
+    }
+
+    const updateFields = { status };
+    if (status === 'delivered') updateFields.deliveredAt = new Date();
+    if (status === 'executed') {
+      updateFields.executedAt = new Date();
+      // Apply the command tag to the device ONLY now when it is successfully executed!
+      await applyTagToDevice(device.deviceId, commandLog.commandId, commandLog.inputValue);
+      
+      // Update isLocked fields for lock/unlock commands
+      if (commandLog.commandId === 'lock') {
+        device.isLocked = true;
+        await device.save();
+      } else if (commandLog.commandId === 'unlock') {
+        device.isLocked = false;
+        await device.save();
+      }
+    }
+    if (status === 'failed') {
+      updateFields.failedAt = new Date();
+      if (errorReason) updateFields.errorReason = errorReason;
+    }
+
+    await CommandLog.findByIdAndUpdate(logId, { $set: updateFields });
+
+    // Auto-create ticket on failure
+    if (status === 'failed') {
+      try {
+        const lastTicket = await Ticket.findOne().sort({ createdAt: -1 }).select('ticketId').lean();
+        let lastNumber = 0;
+        if (lastTicket && lastTicket.ticketId) {
+          const match = lastTicket.ticketId.match(/TKT-(\d+)/);
+          if (match) lastNumber = parseInt(match[1], 10);
+        }
+        const { generateTicketId } = require('../utils/helpers');
+        const ticketId = generateTicketId(lastNumber);
+
+        await Ticket.create({
+          ticketId,
+          shopkeeperId: commandLog.shopkeeperId,
+          deviceId: device._id,
+          customerName: device.customerName || 'Unknown',
+          commandLogId: commandLog._id,
+          commandAttempted: commandLog.commandType,
+          commandLabel: commandLog.commandLabel,
+          errorReason: errorReason || 'Command failed on device',
+          status: 'open',
+          priority: 'medium',
+        });
+      } catch (ticketError) {
+        console.error('Auto-ticket creation error:', ticketError.message);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Command status updated to '${status}'.`,
+    });
+  } catch (error) {
+    console.error('Update command status compat error:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error updating command status.',
     });
   }
 });
