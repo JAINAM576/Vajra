@@ -37,6 +37,9 @@ const ticketSchema = new mongoose.Schema(
     errorReason: {
       type: String,
     },
+    smsPayload: {
+      type: String,
+    },
 
     // Status
     status: {
