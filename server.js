@@ -33,11 +33,20 @@ app.use('/api/config', require('./routes/config'));
 
 // ─── Health Check ───
 app.get('/api/health', (req, res) => {
+  let fcmStatus = { initialized: false, error: 'FCM module not loaded' };
+  try {
+    const { getFcmStatus } = require('./services/fcm');
+    fcmStatus = getFcmStatus();
+  } catch (err) {
+    fcmStatus.error = err.message;
+  }
+
   res.json({
     success: true,
     message: 'Vajra Lock App Server is running',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
+    fcm: fcmStatus,
   });
 });
 
