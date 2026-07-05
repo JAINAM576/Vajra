@@ -25,7 +25,7 @@ const commandLogSchema = new mongoose.Schema(
     },
     category: {
       type: String,
-      enum: ['lock', 'hardware', 'connectivity', 'app', 'actions'],
+      enum: ['lock', 'hardware', 'connectivity', 'app', 'actions', 'general'],
     },
     inputValue: {
       type: String, // if command had input (PIN, alert msg, wallpaper URL)
