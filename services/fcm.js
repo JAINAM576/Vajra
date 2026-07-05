@@ -21,7 +21,28 @@ if (fs.existsSync(keyPath)) {
   } catch (err) {
     console.error('❌ Failed to initialize Firebase Admin via serviceAccountKey.json:', err.message);
     adminInitialized = false;
-    initError = err.message;
+  }
+} else if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
+  try {
+    let privateKey = process.env.FIREBASE_PRIVATE_KEY.trim();
+    if (privateKey.startsWith('"') && privateKey.endsWith('"')) {
+      privateKey = privateKey.substring(1, privateKey.length - 1);
+    }
+    if (privateKey.startsWith("'") && privateKey.endsWith("'")) {
+      privateKey = privateKey.substring(1, privateKey.length - 1);
+    }
+    admin.initializeApp({
+      credential: admin.cert({
+        project_id: process.env.FIREBASE_PROJECT_ID,
+        client_email: process.env.FIREBASE_CLIENT_EMAIL,
+        private_key: privateKey.replace(/\\n/g, '\n')
+      })
+    });
+    adminInitialized = true;
+    console.log('✅ Firebase Admin initialized successfully (via Environment Variables)');
+  } catch (err) {
+    console.error('❌ Failed to initialize Firebase Admin via Environment Variables:', err.message);
+    adminInitialized = false;
   }
 } else {
   const projectId = process.env.FIREBASE_PROJECT_ID;

@@ -162,15 +162,14 @@ router.post('/:deviceId/send', authorizeRoles('shopkeeper', 'super_admin', 'supp
       sentAt: new Date(),
     });
 
-    // Apply tags for online mode
-    if ((mode || 'online') === 'online') {
-      await applyTagToDevice(req.params.deviceId, commandId, inputValue);
-    }
+
 
     // FCM push notification dispatch
     if (device.fcmToken) {
       const { sendCommand } = require('../services/fcm');
-      const extraData = {};
+      const extraData = {
+        commandLogId: String(commandLog._id)
+      };
       
       // Map frontend command properties to fields the Kotlin CommandHandler expects
       if (inputValue) {
@@ -336,10 +335,59 @@ router.post('/:deviceId/offline', authorizeRoles('shopkeeper', 'super_admin', 's
       sentAt: new Date(),
     });
 
+    // If request clicked by shopkeeper, automatically create a ticket with the sms payload and customer details.
+    let ticket = null;
+    if (req.user.role === 'shopkeeper') {
+      try {
+        // Auto-generate ticketId
+        const lastTicket = await Ticket.findOne()
+          .sort({ createdAt: -1 })
+          .select('ticketId')
+          .lean();
+
+        let lastNumber = 0;
+        if (lastTicket && lastTicket.ticketId) {
+          const match = lastTicket.ticketId.match(/TKT-(\d+)/);
+          if (match) lastNumber = parseInt(match[1], 10);
+        }
+
+        const { generateTicketId } = require('../utils/helpers');
+        const ticketId = generateTicketId(lastNumber);
+
+        ticket = await Ticket.create({
+          ticketId,
+          shopkeeperId: shopkeeper._id,
+          shopkeeperName: shopkeeper.shopName || '',
+          deviceId: device._id,
+          customerName: device.customerName || 'Unknown',
+          commandLogId: commandLog._id,
+          commandAttempted: commandLog.commandType,
+          commandLabel: commandLog.commandLabel,
+          errorReason: `Offline command requested by shopkeeper. SMS code requires manual dispatch.`,
+          smsPayload: smsPayload, // Store the SMS payload for super admin to execute
+          status: 'open',
+          priority: 'high',
+        });
+        console.log(`🎫 Auto-created ticket ${ticketId} for offline command from shopkeeper ${shopkeeper._id}`);
+      } catch (ticketErr) {
+        console.error('Failed to auto-create ticket for offline command:', ticketErr.message);
+      }
+    }
+
+    const logObj = commandLog.toObject();
+    if (req.user.role === 'shopkeeper') {
+      delete logObj.smsPayload;
+    }
+
     return res.status(201).json({
       success: true,
-      message: 'Offline command queued successfully.',
-      data: { commandLog },
+      message: req.user.role === 'shopkeeper'
+        ? 'Offline request submitted. An admin will process the SMS command shortly.'
+        : 'Offline command queued successfully.',
+      data: { 
+        commandLog: logObj,
+        ticket: ticket 
+      },
     });
   } catch (error) {
     console.error('Offline command error:', error.message);
@@ -505,4 +553,5 @@ router.put('/:logId/status', async (req, res) => {
   }
 });
 
+router.applyTagToDevice = applyTagToDevice;
 module.exports = router;
