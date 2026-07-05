@@ -165,76 +165,104 @@ router.post('/:deviceId/send', authorizeRoles('shopkeeper', 'super_admin', 'supp
 
 
     // FCM push notification dispatch
-    if (device.fcmToken) {
-      const { sendCommand } = require('../services/fcm');
-      const extraData = {
-        commandLogId: String(commandLog._id)
-      };
-      
-      // Map frontend command properties to fields the Kotlin CommandHandler expects
-      if (inputValue) {
-        if (commandId === 'set_pin') {
-          extraData.pin = String(inputValue);
-          extraData.value = String(inputValue);
-        } else if (commandId === 'alert') {
-          extraData.alert_message = String(inputValue);
-          extraData.message = String(inputValue);
-          extraData.value = String(inputValue);
-        } else if (commandId === 'wallpaper') {
-          extraData.wallpaper_url = String(inputValue);
-          extraData.url = String(inputValue);
-          extraData.value = String(inputValue);
-        } else {
-          extraData.value = String(inputValue);
-        }
-      }
+    if (!device.fcmToken) {
+      commandLog.status = 'failed';
+      commandLog.failedAt = new Date();
+      commandLog.errorReason = 'Device does not have an FCM token registered.';
+      await commandLog.save();
 
-      if (commandId === 'lock') {
-        extraData.emi_amount = device.emiAmount ? String(device.emiAmount) : '';
-        extraData.emi_due_date = device.emiDueDate ? new Date(device.emiDueDate).toISOString().split('T')[0] : '';
-      }
-
-      const SHORT_CMD_MAP = {
-        lock: 'LOCK_DEVICE',
-        unlock: 'UNLOCK_DEVICE',
-        set_pin: 'SET_PASSWORD',
-        clear_pin: 'CLEAR_PASSWORD',
-        camera_off: 'DISABLE_CAMERA',
-        camera_on: 'ENABLE_CAMERA',
-        mute: 'MUTE_VOLUME',
-        unmute: 'UNMUTE_VOLUME',
-        mic_off: 'MUTE_MIC',
-        mic_on: 'UNMUTE_MIC',
-        usb_block: 'BLOCK_USB',
-        usb_unblock: 'UNBLOCK_USB',
-        hide_app: 'HIDE_APP_ICON',
-        show_app: 'SHOW_APP_ICON',
-        alert: 'SHOW_ALERT',
-        wallpaper: 'SET_WALLPAPER',
-        terminate_owner: 'TERMINATE_OWNER_PERMISSION',
-      };
-
-      const fcmCmd = SHORT_CMD_MAP[commandId] || commandId.toUpperCase();
-
-      sendCommand(device.fcmToken, fcmCmd, extraData)
-        .then(fcmRes => {
-          if (fcmRes.success) {
-            commandLog.status = 'sent';
-            commandLog.save();
-          } else {
-            console.warn(`[FCM Command] Dispatch returned warning for ${commandId}:`, fcmRes.error);
-          }
-        })
-        .catch(err => {
-          console.error(`[FCM Command] Dispatch failed for ${commandId}:`, err.message);
-        });
+      return res.status(400).json({
+        success: false,
+        message: 'Device has not registered an FCM token yet. Please ensure the app is open on the device.',
+        data: {},
+      });
     }
 
-    return res.status(201).json({
-      success: true,
-      message: 'Command sent successfully.',
-      data: { commandLog },
-    });
+    const { sendCommand } = require('../services/fcm');
+    const extraData = {
+      commandLogId: String(commandLog._id)
+    };
+    
+    // Map frontend command properties to fields the Kotlin CommandHandler expects
+    if (inputValue) {
+      if (commandId === 'set_pin') {
+        extraData.pin = String(inputValue);
+        extraData.value = String(inputValue);
+      } else if (commandId === 'alert') {
+        extraData.alert_message = String(inputValue);
+        extraData.message = String(inputValue);
+        extraData.value = String(inputValue);
+      } else if (commandId === 'wallpaper') {
+        extraData.wallpaper_url = String(inputValue);
+        extraData.url = String(inputValue);
+        extraData.value = String(inputValue);
+      } else {
+        extraData.value = String(inputValue);
+      }
+    }
+
+    if (commandId === 'lock') {
+      extraData.emi_amount = device.emiAmount ? String(device.emiAmount) : '';
+      extraData.emi_due_date = device.emiDueDate ? new Date(device.emiDueDate).toISOString().split('T')[0] : '';
+    }
+
+    const SHORT_CMD_MAP = {
+      lock: 'LOCK_DEVICE',
+      unlock: 'UNLOCK_DEVICE',
+      set_pin: 'SET_PASSWORD',
+      clear_pin: 'CLEAR_PASSWORD',
+      camera_off: 'DISABLE_CAMERA',
+      camera_on: 'ENABLE_CAMERA',
+      mute: 'MUTE_VOLUME',
+      unmute: 'UNMUTE_VOLUME',
+      mic_off: 'MUTE_MIC',
+      mic_on: 'UNMUTE_MIC',
+      usb_block: 'BLOCK_USB',
+      usb_unblock: 'UNBLOCK_USB',
+      hide_app: 'HIDE_APP_ICON',
+      show_app: 'SHOW_APP_ICON',
+      alert: 'SHOW_ALERT',
+      wallpaper: 'SET_WALLPAPER',
+      terminate_owner: 'TERMINATE_OWNER_PERMISSION',
+    };
+
+    const fcmCmd = SHORT_CMD_MAP[commandId] || commandId.toUpperCase();
+
+    try {
+      const fcmRes = await sendCommand(device.fcmToken, fcmCmd, extraData);
+      if (fcmRes.success) {
+        commandLog.status = 'sent';
+        await commandLog.save();
+
+        return res.status(201).json({
+          success: true,
+          message: 'Command sent successfully.',
+          data: { commandLog },
+        });
+      } else {
+        commandLog.status = 'failed';
+        commandLog.failedAt = new Date();
+        commandLog.errorReason = fcmRes.error || 'FCM dispatch failed';
+        await commandLog.save();
+
+        return res.status(502).json({
+          success: false,
+          message: `Failed to dispatch command: ${fcmRes.error || 'Unknown FCM error'}`,
+          data: {},
+        });
+      }
+    } catch (err) {
+      commandLog.status = 'failed';
+      commandLog.failedAt = new Date();
+      commandLog.errorReason = err.message;
+      await commandLog.save();
+
+      return res.status(500).json({
+        success: false,
+        message: `Internal error dispatching command: ${err.message}`,
+        data: {},
+      });
+    }
   } catch (error) {
     console.error('Send command error:', error.message);
     return res.status(500).json({
