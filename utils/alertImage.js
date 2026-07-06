@@ -211,7 +211,7 @@ function buildAlertSvg(alertMessage, width = 900, height = 1600) {
  */
 async function generateAndUploadAlertImage(alertMessage) {
   // Read base wallpaper template
-  const templateBuffer = fs.readFileSync(TEMPLATE_PATH);
+  const templateBuffer = await fs.promises.readFile(TEMPLATE_PATH);
   const metadata = await sharp(templateBuffer).metadata();
   const width = metadata.width || 900;
   const height = metadata.height || 1600;
