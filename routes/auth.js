@@ -14,6 +14,52 @@ const sendEmail = require('../utils/email');
 
 const Admin = require('../models/Admin');
 const Shopkeeper = require('../models/Shopkeeper');
+const validate = require('../middleware/validator');
+
+// --- Validation Schemas ---
+const loginAdminSchema = {
+  adminId: { required: true, requiredMessage: 'Admin ID and password are required.' },
+  password: { required: true, requiredMessage: 'Admin ID and password are required.' }
+};
+
+const registerShopkeeperSchema = {
+  shopkeeperName: { required: true, requiredMessage: 'shopkeeperName, shopName, location, mobileNo, and password are required.' },
+  shopName: { required: true, requiredMessage: 'shopkeeperName, shopName, location, mobileNo, and password are required.' },
+  location: { required: true, requiredMessage: 'shopkeeperName, shopName, location, mobileNo, and password are required.' },
+  mobileNo: { 
+    required: true, 
+    requiredMessage: 'shopkeeperName, shopName, location, mobileNo, and password are required.',
+    pattern: /^\d{10}$/,
+    message: 'Mobile number must be exactly 10 digits.'
+  },
+  password: { 
+    required: true, 
+    requiredMessage: 'shopkeeperName, shopName, location, mobileNo, and password are required.',
+    minLength: 6,
+    minLengthMessage: 'Password must be at least 6 characters.'
+  }
+};
+
+const loginShopkeeperSchema = {
+  mobileNo: { required: true, requiredMessage: 'Mobile number and password are required.' },
+  password: { required: true, requiredMessage: 'Mobile number and password are required.' }
+};
+
+const forgotPasswordSchema = {
+  gmail: { required: true, requiredMessage: 'Email address is required.' }
+};
+
+const resetPasswordSchema = {
+  gmail: { required: true, requiredMessage: 'Email, verification code, and new password are required.' },
+  otp: { required: true, requiredMessage: 'Email, verification code, and new password are required.' },
+  newPassword: { 
+    required: true, 
+    requiredMessage: 'Email, verification code, and new password are required.',
+    minLength: 6,
+    minLengthMessage: 'Password must be at least 6 characters long.'
+  }
+};
+
 
 /**
  * Sign a JWT with consistent options.
@@ -25,20 +71,10 @@ const signToken = (payload) => {
 };
 
 // ─── POST /admin/login ───────────────────────────────────────────────
-router.post('/admin/login', async (req, res) => {
+router.post('/admin/login', validate(loginAdminSchema), async (req, res) => {
   try {
     const { adminId, password } = req.body;
     console.log(`[DEBUG LOGIN] Attempting login. Received adminId: "${adminId}"`);
-
-    // Validation
-    if (!adminId || !password) {
-      console.log('[DEBUG LOGIN] Validation failed: Missing adminId or password');
-      return res.status(400).json({
-        success: false,
-        message: 'Admin ID and password are required.',
-        data: {},
-      });
-    }
 
     // Find admin
     const admin = await Admin.findOne({ adminId: adminId.toLowerCase() });
@@ -100,7 +136,7 @@ router.post('/admin/login', async (req, res) => {
 });
 
 // ─── POST /shopkeeper/register ───────────────────────────────────────
-router.post('/shopkeeper/register', async (req, res) => {
+router.post('/shopkeeper/register', validate(registerShopkeeperSchema), async (req, res) => {
   try {
     const {
       shopkeeperName,
@@ -111,32 +147,6 @@ router.post('/shopkeeper/register', async (req, res) => {
       aadhaarNo,
       gmail,
     } = req.body;
-
-    // Validation
-    if (!shopkeeperName || !shopName || !location || !mobileNo || !password) {
-      return res.status(400).json({
-        success: false,
-        message:
-          'shopkeeperName, shopName, location, mobileNo, and password are required.',
-        data: {},
-      });
-    }
-
-    if (password.length < 6) {
-      return res.status(400).json({
-        success: false,
-        message: 'Password must be at least 6 characters.',
-        data: {},
-      });
-    }
-
-    if (!/^\d{10}$/.test(mobileNo)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Mobile number must be exactly 10 digits.',
-        data: {},
-      });
-    }
 
     // Check duplicate mobile
     const existing = await Shopkeeper.findOne({ mobileNo, isDeleted: { $ne: true } });
@@ -223,18 +233,9 @@ router.post('/shopkeeper/register', async (req, res) => {
 });
 
 // ─── POST /shopkeeper/login ──────────────────────────────────────────
-router.post('/shopkeeper/login', async (req, res) => {
+router.post('/shopkeeper/login', validate(loginShopkeeperSchema), async (req, res) => {
   try {
     const { mobileNo, password } = req.body;
-
-    // Validation
-    if (!mobileNo || !password) {
-      return res.status(400).json({
-        success: false,
-        message: 'Mobile number and password are required.',
-        data: {},
-      });
-    }
 
     // Find shopkeeper (not soft-deleted)
     const shopkeeper = await Shopkeeper.findOne({
@@ -297,17 +298,9 @@ router.post('/shopkeeper/login', async (req, res) => {
 });
 
 // ─── POST /shopkeeper/forgot-password ────────────────────────────────
-router.post('/shopkeeper/forgot-password', async (req, res) => {
+router.post('/shopkeeper/forgot-password', validate(forgotPasswordSchema), async (req, res) => {
   try {
     const { gmail } = req.body;
-
-    if (!gmail) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email address is required.',
-        data: {},
-      });
-    }
 
     const shopkeeper = await Shopkeeper.findOne({
       gmail: gmail.toLowerCase(),
@@ -378,25 +371,9 @@ router.post('/shopkeeper/forgot-password', async (req, res) => {
 });
 
 // ─── POST /shopkeeper/reset-password ─────────────────────────────────
-router.post('/shopkeeper/reset-password', async (req, res) => {
+router.post('/shopkeeper/reset-password', validate(resetPasswordSchema), async (req, res) => {
   try {
     const { gmail, otp, newPassword } = req.body;
-
-    if (!gmail || !otp || !newPassword) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email, verification code, and new password are required.',
-        data: {},
-      });
-    }
-
-    if (newPassword.length < 6) {
-      return res.status(400).json({
-        success: false,
-        message: 'Password must be at least 6 characters long.',
-        data: {},
-      });
-    }
 
     const shopkeeper = await Shopkeeper.findOne({
       gmail: gmail.toLowerCase(),

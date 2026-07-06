@@ -249,7 +249,7 @@ function extractPublicId(url) {
  * @returns {Promise<string>} — the Cloudinary secure URL
  */
 async function generateAndUploadWallpaper(shopName, mobileNo, shopkeeperId, oldWallpaperUrl) {
-  const templateBuffer = fs.readFileSync(TEMPLATE_PATH);
+  const templateBuffer = await fs.promises.readFile(TEMPLATE_PATH);
   const metadata = await sharp(templateBuffer).metadata();
   const width = metadata.width || 900;
   const height = metadata.height || 1600;
