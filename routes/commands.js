@@ -202,6 +202,16 @@ router.post('/:deviceId/send', authorizeRoles('shopkeeper', 'super_admin', 'supp
     if (commandId === 'lock') {
       extraData.emi_amount = device.emiAmount ? String(device.emiAmount) : '';
       extraData.emi_due_date = device.emiDueDate ? new Date(device.emiDueDate).toISOString().split('T')[0] : '';
+      
+      try {
+        const shopkeeper = await Shopkeeper.findById(device.shopkeeperId);
+        if (shopkeeper) {
+          extraData.shop_name = shopkeeper.shopName || '';
+          extraData.shop_phone = shopkeeper.mobileNo || '';
+        }
+      } catch (err) {
+        console.error('Error fetching shopkeeper details for FCM lock:', err.message);
+      }
     }
 
     const SHORT_CMD_MAP = {

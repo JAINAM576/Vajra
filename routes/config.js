@@ -62,6 +62,7 @@ router.put('/', async (req, res) => {
     const allowedFields = [
       'creditPriceINR',
       'upiId',
+      'frpAccountEmail',
       'maintenanceMode',
       'minAppVersion',
       'deviceOwnerQrUrl',

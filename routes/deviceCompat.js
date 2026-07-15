@@ -6,6 +6,7 @@ const ActivationKey = require('../models/ActivationKey');
 const Shopkeeper = require('../models/Shopkeeper');
 const CommandLog = require('../models/CommandLog');
 const Ticket = require('../models/Ticket');
+const SystemConfig = require('../models/SystemConfig');
 const { applyTagToDevice } = require('./commands');
 
 // ─── POST /api/device/activate — Client app device activation ─────────
@@ -87,12 +88,16 @@ router.post('/activate', async (req, res) => {
 
     console.log(`✅ Device registered successfully: ${device.deviceId}`);
 
+    const systemConfig = await SystemConfig.findOne({ configKey: 'platform' });
+    const frpAccount = systemConfig ? systemConfig.frpAccountEmail : '';
+
     return res.status(200).json({
       success: true,
       message: 'Device registered successfully.',
       deviceId: device.deviceId,
       shopName: shopkeeper ? shopkeeper.shopName : 'Retailer',
       shopPhone: shopkeeper ? shopkeeper.mobileNo : '',
+      frpAccount: frpAccount || '',
     });
 
   } catch (error) {
@@ -153,11 +158,18 @@ router.post('/heartbeat', async (req, res) => {
       });
     }
 
+    const shopkeeper = await Shopkeeper.findById(device.shopkeeperId);
+    const systemConfig = await SystemConfig.findOne({ configKey: 'platform' });
+    const frpAccount = systemConfig ? systemConfig.frpAccountEmail : '';
+
     // Return the desired state so client lock policies remain synced with DB state
     return res.status(200).json({
       success: true,
       message: 'Heartbeat received.',
       isLocked: device.isLocked,
+      shopName: shopkeeper ? shopkeeper.shopName : 'Retailer',
+      shopPhone: shopkeeper ? shopkeeper.mobileNo : '',
+      frpAccount: frpAccount || '',
     });
 
   } catch (error) {

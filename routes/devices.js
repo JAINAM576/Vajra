@@ -258,6 +258,7 @@ router.post('/activate', authorizeShopkeeper, validate(activateDeviceSchema), as
       customerMobile,
       deviceModel,
       totalAmount: totalAmount || 0,
+      emiRemaining: totalAmount || 0,
       emiAmount: emiAmount || 0,
       totalEmis: totalMonths || 0,
       interestRate: interestRate || 0,
@@ -316,6 +317,12 @@ router.put('/:deviceId', async (req, res) => {
       'interestRate',
       'paidEmis',
       'emiAmount',
+      'totalAmount',
+      'emiRemaining',
+      'isCompleted',
+      'isLocked',
+      'status',
+      'appliedTags'
     ];
     const updates = {};
 

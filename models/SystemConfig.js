@@ -38,6 +38,10 @@ const systemConfigSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    frpAccountEmail: {
+      type: String,
+      default: '',
+    },
 
     // Wallpaper Templates (Cloudinary URLs — uploaded later)
     wallpaperTemplates: [wallpaperTemplateSchema],
