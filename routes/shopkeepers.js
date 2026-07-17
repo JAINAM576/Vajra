@@ -173,15 +173,15 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// ─── PUT /:id/credits — Add credits ─────────────────────────────────
+// ─── PUT /:id/credits — Add/Deduct credits ───────────────────────────
 router.put('/:id/credits', async (req, res) => {
   try {
     const { amount, paymentMethod, paymentReference, notes } = req.body;
 
-    if (!amount || typeof amount !== 'number' || amount <= 0) {
+    if (typeof amount !== 'number' || amount === 0) {
       return res.status(400).json({
         success: false,
-        message: 'A positive numeric amount is required.',
+        message: 'A non-zero numeric amount is required.',
         data: {},
       });
     }
@@ -198,17 +198,27 @@ router.put('/:id/credits', async (req, res) => {
     const balanceBefore = shopkeeper.credits || 0;
     const balanceAfter = balanceBefore + amount;
 
+    if (balanceAfter < 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Insufficient credits. Shopkeeper only has ${balanceBefore} credits.`,
+        data: {},
+      });
+    }
+
     // Update shopkeeper credits
     shopkeeper.credits = balanceAfter;
     await shopkeeper.save();
 
+    const transactionType = amount < 0 ? 'deduction' : 'purchase';
+
     // Create credit transaction record
     const transaction = await CreditTransaction.create({
       shopkeeperId: shopkeeper._id,
-      type: 'purchase',
+      type: transactionType,
       amount,
-      pricePerCredit: 1,
-      totalPrice: amount,
+      pricePerCredit: amount < 0 ? 0 : 1,
+      totalPrice: amount < 0 ? 0 : amount,
       balanceBefore,
       balanceAfter,
       paymentMethod: paymentMethod || 'manual',

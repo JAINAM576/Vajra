@@ -111,16 +111,16 @@ router.get('/:shopkeeperId', async (req, res) => {
   }
 });
 
-// ─── POST /:shopkeeperId/add — Admin: add credits ────────────────────
+// ─── POST /:shopkeeperId/add — Admin: add/deduct credits ──────────────
 router.post('/:shopkeeperId/add', authorizeAdmin, async (req, res) => {
   try {
     const { shopkeeperId } = req.params;
     const { amount, paymentMethod, paymentReference, notes } = req.body;
 
-    if (!amount || typeof amount !== 'number' || amount <= 0) {
+    if (typeof amount !== 'number' || amount === 0) {
       return res.status(400).json({
         success: false,
-        message: 'A positive numeric amount is required.',
+        message: 'A non-zero numeric amount is required.',
         data: {},
       });
     }
@@ -137,15 +137,25 @@ router.post('/:shopkeeperId/add', authorizeAdmin, async (req, res) => {
     const balanceBefore = shopkeeper.credits || 0;
     const balanceAfter = balanceBefore + amount;
 
+    if (balanceAfter < 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Insufficient credits. Shopkeeper only has ${balanceBefore} credits.`,
+        data: {},
+      });
+    }
+
     shopkeeper.credits = balanceAfter;
     await shopkeeper.save();
 
+    const transactionType = amount < 0 ? 'deduction' : 'purchase';
+
     const transaction = await CreditTransaction.create({
       shopkeeperId,
-      type: 'purchase',
+      type: transactionType,
       amount,
-      pricePerCredit: 1,
-      totalPrice: amount,
+      pricePerCredit: amount < 0 ? 0 : 1,
+      totalPrice: amount < 0 ? 0 : amount,
       balanceBefore,
       balanceAfter,
       paymentMethod: paymentMethod || 'manual',
@@ -156,7 +166,7 @@ router.post('/:shopkeeperId/add', authorizeAdmin, async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: `${amount} credits added to shopkeeper.`,
+      message: `${amount < 0 ? Math.abs(amount) + ' credits deducted from' : amount + ' credits added to'} shopkeeper.`,
       data: {
         credits: balanceAfter,
         transaction,
