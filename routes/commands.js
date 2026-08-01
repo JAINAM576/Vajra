@@ -145,6 +145,14 @@ router.post('/:deviceId/send', authorizeRoles('shopkeeper', 'super_admin', 'supp
       });
     }
 
+    if (device.isCompleted || device.status === 'Completed') {
+      return res.status(403).json({
+        success: false,
+        message: 'This device application is completed. Remote commands cannot be sent.',
+        data: {},
+      });
+    }
+
     // Create command log
     // Use device.shopkeeperId so admin commands are still attributed to the device's owner
     const commandLog = await CommandLog.create({
@@ -299,6 +307,14 @@ router.post('/:deviceId/offline', authorizeRoles('shopkeeper', 'super_admin', 's
         message: req.user.role === 'shopkeeper'
           ? 'Device not found or does not belong to you.'
           : 'Device not found.',
+        data: {},
+      });
+    }
+
+    if (device.isCompleted || device.status === 'Completed') {
+      return res.status(403).json({
+        success: false,
+        message: 'This device application is completed. Remote commands cannot be sent.',
         data: {},
       });
     }
@@ -525,6 +541,31 @@ router.put('/:logId/status', async (req, res) => {
         message: 'Command log not found.',
         data: {},
       });
+    }
+
+    // When status is executed, apply tag changes and mark device as Completed if terminate_owner
+    if (status === 'executed') {
+      try {
+        await applyTagToDevice(commandLog.deviceId, commandLog.commandId, commandLog.inputValue);
+        
+        if (
+          commandLog.commandType === 'TERMINATE_OWNER_PERMISSION' ||
+          commandLog.commandId === 'terminate_owner'
+        ) {
+          await Device.findByIdAndUpdate(commandLog.deviceId, {
+            $set: {
+              isCompleted: true,
+              status: 'Completed',
+              isActive: false,
+              deactivatedAt: new Date(),
+              appliedTags: {}
+            }
+          });
+          console.log(`✅ Device ${commandLog.deviceId} marked as Completed following release termination.`);
+        }
+      } catch (tagErr) {
+        console.error('Error applying tags/status on command executed:', tagErr.message);
+      }
     }
 
     // Auto-create ticket on failure

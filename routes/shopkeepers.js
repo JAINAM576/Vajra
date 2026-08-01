@@ -198,14 +198,6 @@ router.put('/:id/credits', async (req, res) => {
     const balanceBefore = shopkeeper.credits || 0;
     const balanceAfter = balanceBefore + amount;
 
-    if (balanceAfter < 0) {
-      return res.status(400).json({
-        success: false,
-        message: `Insufficient credits. Shopkeeper only has ${balanceBefore} credits.`,
-        data: {},
-      });
-    }
-
     // Update shopkeeper credits
     shopkeeper.credits = balanceAfter;
     await shopkeeper.save();

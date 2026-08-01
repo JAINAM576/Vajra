@@ -34,6 +34,11 @@ const systemConfigSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    // TestDPC QR (Cloudinary URL — uploaded later)
+    testDpcQrUrl: {
+      type: String,
+      default: '',
+    },
     upiId: {
       type: String,
       default: '',

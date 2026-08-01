@@ -145,6 +145,14 @@ const deviceSchema = new mongoose.Schema(
     },
 
     // Status
+    isCompleted: {
+      type: Boolean,
+      default: false,
+    },
+    status: {
+      type: String,
+      default: 'Active',
+    },
     isActive: {
       type: Boolean,
       default: true,

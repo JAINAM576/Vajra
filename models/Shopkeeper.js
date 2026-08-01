@@ -50,7 +50,6 @@ const shopkeeperSchema = new mongoose.Schema(
     credits: {
       type: Number,
       default: 0,
-      min: [0, 'Credits cannot be negative'],
     },
     totalCreditsUsed: {
       type: Number,

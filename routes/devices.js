@@ -98,22 +98,26 @@ router.put('/:deviceId/heartbeat', async (req, res) => {
 // All routes below require authentication
 router.use(authenticate);
 
-// ─── GET / — List devices (role-scoped) ──────────────────────────────
+// ─── GET / — List devices (role-scoped, with pagination, filters & stats) ────
 router.get('/', async (req, res) => {
   try {
-    const { search, online, locked } = req.query;
+    const { search, filter: filterParam, page: pageParam, limit: limitParam, online, locked } = req.query;
 
-    const filter = { isDeleted: { $ne: true } };
+    const page = Math.max(1, parseInt(pageParam) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(limitParam) || 20));
+
+    // Base filter: exclude soft-deleted devices
+    const baseFilter = { isDeleted: { $ne: true } };
 
     // Scope to shopkeeper's own devices
     if (req.user.role === 'shopkeeper') {
-      filter.shopkeeperId = req.user.id;
+      baseFilter.shopkeeperId = req.user.id;
     }
 
-    // Search filter
+    // Search filter — applied to both stats query and list query
     if (search) {
       const regex = new RegExp(search, 'i');
-      filter.$or = [
+      baseFilter.$or = [
         { customerName: regex },
         { customerMobile: regex },
         { deviceId: regex },
@@ -121,25 +125,184 @@ router.get('/', async (req, res) => {
       ];
     }
 
-    // Online filter
+    // Legacy query-param compat
     if (online !== undefined) {
-      filter.isOnline = online === 'true';
+      baseFilter.isOnline = online === 'true';
     }
-
-    // Locked filter
     if (locked !== undefined) {
-      filter.isLocked = locked === 'true';
+      baseFilter.isLocked = locked === 'true';
     }
 
-    const devices = await Device.find(filter)
-      .populate('shopkeeperId', 'shopkeeperName shopName')
+    // ── Fetch ALL devices matching base filter (for stats) ──
+    const allDevices = await Device.find(baseFilter)
       .sort({ createdAt: -1 })
       .lean();
+
+    // ── Compute stats across all devices (unfiltered by tab) ──
+    const now = new Date();
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const OFFLINE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+
+    let onlineCount = 0;
+    let lockedCount = 0;
+    let emiDueCount = 0;
+    let emiLowCount = 0;
+    let recentCount = 0;
+    let totalEmiPending = 0;
+
+    const remindersList = [];
+
+    for (const d of allDevices) {
+      // Online: has heartbeat within last 5 minutes
+      const lastSeen = d.lastSeen ? new Date(d.lastSeen) : null;
+      const isDeviceOnline = d.isOnline === true || (lastSeen && (now.getTime() - lastSeen.getTime()) < OFFLINE_THRESHOLD_MS);
+      if (isDeviceOnline) onlineCount++;
+
+      if (d.isLocked) lockedCount++;
+
+      // EMI calculations
+      const totalEmis = d.totalEmis || 0;
+      const paidEmis = d.paidEmis || 0;
+      const emiAmount = d.emiAmount || 0;
+      const emiRemaining = d.emiRemaining || 0;
+
+      if (emiRemaining > 0) totalEmiPending += emiRemaining;
+
+      // EMI due: has remaining EMIs and not completed
+      const purchaseDateVal = d.purchaseDate || d.registeredAt || d.createdAt;
+      const purchaseDate = purchaseDateVal ? new Date(purchaseDateVal) : null;
+
+      if (!d.isCompleted && totalEmis > 0 && paidEmis < totalEmis && purchaseDate) {
+        // Calculate the next EMI due date
+        const nextDueMonth = paidEmis + 1;
+        const nextDueDate = new Date(purchaseDate);
+        nextDueDate.setMonth(nextDueDate.getMonth() + nextDueMonth);
+
+        const isOverdue = now > nextDueDate;
+        const daysUntilDue = Math.ceil((nextDueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+        if (isOverdue || daysUntilDue <= 7) {
+          emiDueCount++;
+
+          // Build reminder
+          let reminderStatus = 'upcoming';
+          let reminderMessage = '';
+          if (isOverdue) {
+            reminderStatus = 'overdue';
+            const daysBehind = Math.abs(daysUntilDue);
+            reminderMessage = `${d.customerName}'s EMI of ₹${emiAmount} is ${daysBehind} day(s) overdue.`;
+          } else if (daysUntilDue <= 0) {
+            reminderStatus = 'today';
+            reminderMessage = `${d.customerName}'s EMI of ₹${emiAmount} is due today.`;
+          } else {
+            reminderStatus = 'upcoming';
+            reminderMessage = `${d.customerName}'s EMI of ₹${emiAmount} is due in ${daysUntilDue} day(s).`;
+          }
+
+          remindersList.push({
+            id: d._id.toString(),
+            customerName: d.customerName,
+            customerMobile: d.customerMobile,
+            emiAmount,
+            status: reminderStatus,
+            message: reminderMessage,
+            device: d,
+          });
+        }
+      }
+
+      // EMI low: paid less than 50% of total EMIs
+      if (!d.isCompleted && totalEmis > 0 && paidEmis > 0 && (paidEmis / totalEmis) < 0.5) {
+        emiLowCount++;
+      }
+
+      // Recent: registered within last 7 days
+      const createdAt = d.createdAt ? new Date(d.createdAt) : null;
+      if (createdAt && createdAt >= sevenDaysAgo) {
+        recentCount++;
+      }
+    }
+
+    const totalDevices = allDevices.length;
+
+    const stats = {
+      totalDevices,
+      onlineCount,
+      lockedCount,
+      emiDueCount,
+      emiLowCount,
+      recentCount,
+      totalEmiPending,
+    };
+
+    // Sort reminders: overdue first, then today, then upcoming
+    const statusOrder = { overdue: 0, today: 1, upcoming: 2 };
+    remindersList.sort((a, b) => (statusOrder[a.status] || 9) - (statusOrder[b.status] || 9));
+
+    // ── Apply tab filter to select which devices to return ──
+    let filteredDevices = allDevices;
+    if (filterParam && filterParam !== 'all') {
+      filteredDevices = allDevices.filter((d) => {
+        const lastSeen = d.lastSeen ? new Date(d.lastSeen) : null;
+        const isDeviceOnline = d.isOnline === true || (lastSeen && (now.getTime() - lastSeen.getTime()) < OFFLINE_THRESHOLD_MS);
+
+        switch (filterParam) {
+          case 'online':
+            return isDeviceOnline;
+          case 'offline':
+            return !isDeviceOnline;
+          case 'locked':
+            return d.isLocked === true;
+          case 'emi_due': {
+            const totalEmis = d.totalEmis || 0;
+            const paidEmis = d.paidEmis || 0;
+            const purchaseDateVal = d.purchaseDate || d.registeredAt || d.createdAt;
+            const purchaseDate = purchaseDateVal ? new Date(purchaseDateVal) : null;
+            if (d.isCompleted || totalEmis === 0 || paidEmis >= totalEmis || !purchaseDate) return false;
+            const nextDueMonth = paidEmis + 1;
+            const nextDueDate = new Date(purchaseDate);
+            nextDueDate.setMonth(nextDueDate.getMonth() + nextDueMonth);
+            const daysUntilDue = Math.ceil((nextDueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+            return (now > nextDueDate) || daysUntilDue <= 7;
+          }
+          case 'emi_low': {
+            const totalEmis = d.totalEmis || 0;
+            const paidEmis = d.paidEmis || 0;
+            return !d.isCompleted && totalEmis > 0 && paidEmis > 0 && (paidEmis / totalEmis) < 0.5;
+          }
+          case 'recent': {
+            const createdAt = d.createdAt ? new Date(d.createdAt) : null;
+            return createdAt && createdAt >= sevenDaysAgo;
+          }
+          default:
+            return true;
+        }
+      });
+    }
+
+    // ── Paginate ──
+    const totalFiltered = filteredDevices.length;
+    const startIndex = (page - 1) * limit;
+    const paginatedDevices = filteredDevices.slice(startIndex, startIndex + limit);
+    const hasMore = startIndex + limit < totalFiltered;
+
+    // Populate shopkeeper info for paginated devices
+    const populatedDevices = await Device.populate(paginatedDevices, {
+      path: 'shopkeeperId',
+      select: 'shopkeeperName shopName',
+    });
 
     return res.status(200).json({
       success: true,
       message: 'Devices retrieved successfully.',
-      data: { devices, count: devices.length },
+      data: {
+        devices: populatedDevices,
+        count: totalFiltered,
+        page,
+        hasMore,
+        stats,
+        reminders: remindersList.slice(0, 10),
+      },
     });
   } catch (error) {
     console.error('List devices error:', error.message);
@@ -340,7 +503,11 @@ router.put('/:deviceId', async (req, res) => {
       });
     }
 
-    const filter = { deviceId: req.params.deviceId };
+    const mongoose = require('mongoose');
+    const isObjectId = mongoose.Types.ObjectId.isValid(req.params.deviceId);
+    const filter = isObjectId
+      ? { $or: [{ deviceId: req.params.deviceId }, { _id: req.params.deviceId }] }
+      : { deviceId: req.params.deviceId };
 
     // Shopkeepers can only update their own devices
     if (req.user.role === 'shopkeeper') {
@@ -379,7 +546,11 @@ router.put('/:deviceId', async (req, res) => {
 // ─── DELETE /:deviceId — Soft delete ─────────────────────────────────
 router.delete('/:deviceId', async (req, res) => {
   try {
-    const filter = { deviceId: req.params.deviceId };
+    const mongoose = require('mongoose');
+    const isObjectId = mongoose.Types.ObjectId.isValid(req.params.deviceId);
+    const filter = isObjectId
+      ? { $or: [{ deviceId: req.params.deviceId }, { _id: req.params.deviceId }] }
+      : { deviceId: req.params.deviceId };
 
     // Shopkeepers can only delete their own devices
     if (req.user.role === 'shopkeeper') {

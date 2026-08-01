@@ -66,6 +66,7 @@ router.put('/', async (req, res) => {
       'maintenanceMode',
       'minAppVersion',
       'deviceOwnerQrUrl',
+      'testDpcQrUrl',
       'paymentQrUrl',
     ];
     const updates = {};
@@ -293,6 +294,45 @@ router.put('/device-owner-qr', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Server error updating device owner QR URL.',
+      data: {},
+    });
+  }
+});
+
+// ─── PUT /test-dpc-qr — Update TestDPC QR URL ─────────────────────────
+router.put('/test-dpc-qr', async (req, res) => {
+  try {
+    const { testDpcQrUrl } = req.body;
+
+    if (!testDpcQrUrl) {
+      return res.status(400).json({
+        success: false,
+        message: 'testDpcQrUrl is required.',
+        data: {},
+      });
+    }
+
+    const config = await Config.findOneAndUpdate(
+      { configKey: 'platform' },
+      {
+        $set: {
+          testDpcQrUrl,
+          updatedBy: req.user.id,
+        },
+      },
+      { new: true, upsert: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'TestDPC QR URL updated successfully.',
+      data: { testDpcQrUrl: config.testDpcQrUrl },
+    });
+  } catch (error) {
+    console.error('Update TestDPC QR error:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error updating TestDPC QR URL.',
       data: {},
     });
   }
