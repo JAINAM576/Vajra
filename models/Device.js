@@ -54,6 +54,14 @@ const deviceSchema = new mongoose.Schema(
       sparse: true,
       trim: true,
     },
+    imei1: {
+      type: String,
+      trim: true,
+    },
+    imei2: {
+      type: String,
+      trim: true,
+    },
     fcmToken: {
       type: String,
     },

@@ -104,7 +104,7 @@ router.get('/', async (req, res) => {
     const { search, filter: filterParam, page: pageParam, limit: limitParam, online, locked } = req.query;
 
     const page = Math.max(1, parseInt(pageParam) || 1);
-    const limit = Math.min(50, Math.max(1, parseInt(limitParam) || 20));
+    const limit = limitParam === 'all' || !limitParam ? 10000 : Math.max(1, parseInt(limitParam) || 10000);
 
     // Base filter: exclude soft-deleted devices
     const baseFilter = { isDeleted: { $ne: true } };
@@ -367,6 +367,8 @@ router.post('/activate', authorizeShopkeeper, validate(activateDeviceSchema), as
       emiAmount,
       totalMonths,
       interestRate,
+      imei1,
+      imei2,
     } = req.body;
 
     // Step 1: Find unused activation key
@@ -392,23 +394,41 @@ router.post('/activate', authorizeShopkeeper, validate(activateDeviceSchema), as
       });
     }
 
-    // Step 2: Check shopkeeper has credits
+    // Step 2: Check platform and credits
+    const targetPlatform = (req.body.platform || 'android').toLowerCase() === 'ios' ? 'ios' : 'android';
     const shopkeeper = await Shopkeeper.findById(req.user.id);
-    if (!shopkeeper || (shopkeeper.credits || 0) < 1) {
+
+    const availableCredits = targetPlatform === 'ios'
+      ? (shopkeeper?.iosCredits || 0)
+      : (shopkeeper?.androidCredits || 0);
+
+    if (!shopkeeper || availableCredits < 1) {
       return res.status(400).json({
         success: false,
-        message: 'Insufficient credits. You need at least 1 credit to activate a device.',
+        message: `Insufficient ${targetPlatform.toUpperCase()} credits. You need at least 1 ${targetPlatform.toUpperCase()} credit to activate a device.`,
         data: {},
       });
     }
 
-    const balanceBefore = shopkeeper.credits;
+    const balanceBefore = shopkeeper.credits || 0;
+    const balanceAndroidBefore = shopkeeper.androidCredits || 0;
+    const balanceIosBefore = shopkeeper.iosCredits || 0;
 
-    // Step 3: Deduct 1 credit
-    shopkeeper.credits -= 1;
+    // Step 3: Deduct 1 credit from platform pool
+    if (targetPlatform === 'ios') {
+      shopkeeper.iosCredits = Math.max(0, (shopkeeper.iosCredits || 0) - 1);
+      shopkeeper.totalIosCreditsUsed = (shopkeeper.totalIosCreditsUsed || 0) + 1;
+    } else {
+      shopkeeper.androidCredits = Math.max(0, (shopkeeper.androidCredits || 0) - 1);
+      shopkeeper.totalAndroidCreditsUsed = (shopkeeper.totalAndroidCreditsUsed || 0) + 1;
+    }
+    shopkeeper.credits = (shopkeeper.androidCredits || 0) + (shopkeeper.iosCredits || 0);
+    shopkeeper.totalCreditsUsed = (shopkeeper.totalAndroidCreditsUsed || 0) + (shopkeeper.totalIosCreditsUsed || 0);
     await shopkeeper.save();
 
     const balanceAfter = shopkeeper.credits;
+    const balanceAndroidAfter = shopkeeper.androidCredits;
+    const balanceIosAfter = shopkeeper.iosCredits;
 
     // Step 4: Create device
     const deviceId = generateDeviceId();
@@ -420,11 +440,15 @@ router.post('/activate', authorizeShopkeeper, validate(activateDeviceSchema), as
       customerName,
       customerMobile,
       deviceModel,
+      platform: targetPlatform,
       totalAmount: totalAmount || 0,
       emiRemaining: totalAmount || 0,
       emiAmount: emiAmount || 0,
       totalEmis: totalMonths || 0,
       interestRate: interestRate || 0,
+      imei1: imei1 || undefined,
+      imei2: imei2 || undefined,
+      imei: imei1 || imei2 || undefined,
       isActive: true,
       registeredAt: new Date(),
     });
@@ -442,12 +466,17 @@ router.post('/activate', authorizeShopkeeper, validate(activateDeviceSchema), as
     await CreditTransaction.create({
       shopkeeperId: req.user.id,
       type: 'deduction',
+      platform: targetPlatform,
       amount: -1,
       pricePerCredit: 1,
       totalPrice: 0,
       balanceBefore,
       balanceAfter,
-      description: `Device activation: ${deviceId}`,
+      balanceAndroidBefore,
+      balanceAndroidAfter,
+      balanceIosBefore,
+      balanceIosAfter,
+      notes: `Device activation (${targetPlatform.toUpperCase()}): ${deviceId}`,
       approvedBy: req.user.id,
     });
 
@@ -457,6 +486,8 @@ router.post('/activate', authorizeShopkeeper, validate(activateDeviceSchema), as
       data: {
         device,
         creditsRemaining: balanceAfter,
+        androidCreditsRemaining: balanceAndroidAfter,
+        iosCreditsRemaining: balanceIosAfter,
       },
     });
   } catch (error) {
@@ -485,7 +516,10 @@ router.put('/:deviceId', async (req, res) => {
       'isCompleted',
       'isLocked',
       'status',
-      'appliedTags'
+      'appliedTags',
+      'imei',
+      'imei1',
+      'imei2',
     ];
     const updates = {};
 

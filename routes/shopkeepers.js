@@ -176,7 +176,7 @@ router.put('/:id', async (req, res) => {
 // ─── PUT /:id/credits — Add/Deduct credits ───────────────────────────
 router.put('/:id/credits', async (req, res) => {
   try {
-    const { amount, paymentMethod, paymentReference, notes } = req.body;
+    const { amount, platform = 'android', paymentMethod, paymentReference, notes } = req.body;
 
     if (typeof amount !== 'number' || amount === 0) {
       return res.status(400).json({
@@ -185,6 +185,8 @@ router.put('/:id/credits', async (req, res) => {
         data: {},
       });
     }
+
+    const targetPlatform = platform === 'ios' ? 'ios' : 'android';
 
     const shopkeeper = await Shopkeeper.findById(req.params.id);
     if (!shopkeeper || shopkeeper.isDeleted) {
@@ -196,11 +198,24 @@ router.put('/:id/credits', async (req, res) => {
     }
 
     const balanceBefore = shopkeeper.credits || 0;
-    const balanceAfter = balanceBefore + amount;
+    const balanceAndroidBefore = shopkeeper.androidCredits || 0;
+    const balanceIosBefore = shopkeeper.iosCredits || 0;
 
-    // Update shopkeeper credits
-    shopkeeper.credits = balanceAfter;
+    if (targetPlatform === 'ios') {
+      shopkeeper.iosCredits = (shopkeeper.iosCredits || 0) + amount;
+      if (shopkeeper.iosCredits < 0) shopkeeper.iosCredits = 0;
+    } else {
+      shopkeeper.androidCredits = (shopkeeper.androidCredits || 0) + amount;
+      if (shopkeeper.androidCredits < 0) shopkeeper.androidCredits = 0;
+    }
+
+    // Keep legacy credits field in sync
+    shopkeeper.credits = (shopkeeper.androidCredits || 0) + (shopkeeper.iosCredits || 0);
     await shopkeeper.save();
+
+    const balanceAfter = shopkeeper.credits;
+    const balanceAndroidAfter = shopkeeper.androidCredits;
+    const balanceIosAfter = shopkeeper.iosCredits;
 
     const transactionType = amount < 0 ? 'deduction' : 'purchase';
 
@@ -208,11 +223,16 @@ router.put('/:id/credits', async (req, res) => {
     const transaction = await CreditTransaction.create({
       shopkeeperId: shopkeeper._id,
       type: transactionType,
+      platform: targetPlatform,
       amount,
       pricePerCredit: amount < 0 ? 0 : 1,
       totalPrice: amount < 0 ? 0 : amount,
       balanceBefore,
       balanceAfter,
+      balanceAndroidBefore,
+      balanceAndroidAfter,
+      balanceIosBefore,
+      balanceIosAfter,
       paymentMethod: paymentMethod || 'manual',
       paymentReference: paymentReference || '',
       notes: notes || '',
@@ -221,9 +241,11 @@ router.put('/:id/credits', async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: `${amount} credits added successfully.`,
+      message: `${amount < 0 ? Math.abs(amount) + ' ' + targetPlatform.toUpperCase() + ' credits deducted' : amount + ' ' + targetPlatform.toUpperCase() + ' credits added'} successfully.`,
       data: {
         credits: balanceAfter,
+        androidCredits: balanceAndroidAfter,
+        iosCredits: balanceIosAfter,
         transaction,
       },
     });

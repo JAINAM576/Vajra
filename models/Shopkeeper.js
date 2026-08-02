@@ -46,8 +46,24 @@ const shopkeeperSchema = new mongoose.Schema(
       default: '',
     },
 
-    // Credit System
+    // Credit System (Bifurcated by Platform)
+    androidCredits: {
+      type: Number,
+      default: 0,
+    },
+    iosCredits: {
+      type: Number,
+      default: 0,
+    },
     credits: {
+      type: Number,
+      default: 0,
+    },
+    totalAndroidCreditsUsed: {
+      type: Number,
+      default: 0,
+    },
+    totalIosCreditsUsed: {
       type: Number,
       default: 0,
     },

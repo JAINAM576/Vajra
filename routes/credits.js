@@ -19,7 +19,7 @@ router.use(authenticate);
 // Must be defined BEFORE /:shopkeeperId to avoid param collision
 router.get('/summary/platform', authorizeAdmin, async (req, res) => {
   try {
-    const [purchaseStats, deductionStats] = await Promise.all([
+    const [purchaseStats, deductionStats, platformPurchaseStats, platformDeductionStats] = await Promise.all([
       CreditTransaction.aggregate([
         { $match: { type: 'purchase' } },
         {
@@ -41,6 +41,24 @@ router.get('/summary/platform', authorizeAdmin, async (req, res) => {
           },
         },
       ]),
+      CreditTransaction.aggregate([
+        { $match: { type: 'purchase' } },
+        {
+          $group: {
+            _id: '$platform',
+            totalPurchased: { $sum: '$amount' },
+          },
+        },
+      ]),
+      CreditTransaction.aggregate([
+        { $match: { type: 'deduction' } },
+        {
+          $group: {
+            _id: '$platform',
+            totalUsed: { $sum: { $abs: '$amount' } },
+          },
+        },
+      ]),
     ]);
 
     const purchase = purchaseStats[0] || {
@@ -53,12 +71,30 @@ router.get('/summary/platform', authorizeAdmin, async (req, res) => {
       transactionCount: 0,
     };
 
+    let androidCreditsPurchased = 0;
+    let iosCreditsPurchased = 0;
+    platformPurchaseStats.forEach((p) => {
+      if (p._id === 'ios') iosCreditsPurchased += p.totalPurchased;
+      else androidCreditsPurchased += p.totalPurchased;
+    });
+
+    let androidCreditsUsed = 0;
+    let iosCreditsUsed = 0;
+    platformDeductionStats.forEach((p) => {
+      if (p._id === 'ios') iosCreditsUsed += p.totalUsed;
+      else androidCreditsUsed += p.totalUsed;
+    });
+
     return res.status(200).json({
       success: true,
       message: 'Platform credit summary retrieved successfully.',
       data: {
         totalCreditsPurchased: purchase.totalCreditsPurchased,
         totalCreditsUsed: deduction.totalCreditsUsed,
+        androidCreditsPurchased,
+        iosCreditsPurchased,
+        androidCreditsUsed,
+        iosCreditsUsed,
         totalRevenue: purchase.totalRevenue,
         purchaseTransactions: purchase.transactionCount,
         deductionTransactions: deduction.transactionCount,

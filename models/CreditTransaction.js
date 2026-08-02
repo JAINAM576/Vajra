@@ -43,6 +43,12 @@ const creditTransactionSchema = new mongoose.Schema(
       ref: 'Device',
     },
 
+    platform: {
+      type: String,
+      enum: ['android', 'ios', 'general'],
+      default: 'android',
+    },
+
     // Approval
     approvedBy: {
       type: mongoose.Schema.Types.ObjectId,
@@ -54,6 +60,18 @@ const creditTransactionSchema = new mongoose.Schema(
       type: Number,
     },
     balanceAfter: {
+      type: Number,
+    },
+    balanceAndroidBefore: {
+      type: Number,
+    },
+    balanceAndroidAfter: {
+      type: Number,
+    },
+    balanceIosBefore: {
+      type: Number,
+    },
+    balanceIosAfter: {
       type: Number,
     },
 
