@@ -506,6 +506,36 @@ router.get('/:deviceId/logs', async (req, res) => {
   }
 });
 
+// ─── GET /log/:logId/status — Check single command status ──────────────
+router.get('/log/:logId/status', async (req, res) => {
+  try {
+    const commandLog = await CommandLog.findById(req.params.logId)
+      .select('status executedAt failedAt errorReason commandId commandType deviceId createdAt')
+      .lean();
+
+    if (!commandLog) {
+      return res.status(404).json({
+        success: false,
+        message: 'Command log not found.',
+        data: {},
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Command status fetched successfully.',
+      data: { commandLog },
+    });
+  } catch (error) {
+    console.error('Command status error:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error fetching command status.',
+      data: {},
+    });
+  }
+});
+
 // ─── PUT /:logId/status — Update command status ──────────────────────
 router.put('/:logId/status', async (req, res) => {
   try {

@@ -12,9 +12,9 @@ const { applyTagToDevice } = require('./commands');
 // ─── POST /api/device/activate — Client app device activation ─────────
 router.post('/activate', async (req, res) => {
   try {
-    const { activationKey, imei, fcmToken, deviceModel, androidVersion } = req.body;
+    const { activationKey, imei, fcmToken, deviceModel, androidVersion, drmDeviceId } = req.body;
 
-    console.log(`\n📱 Client device activation: key=${activationKey}, model=${deviceModel}`);
+    console.log(`\n📱 Client device activation: key=${activationKey}, model=${deviceModel}, drmId=${drmDeviceId || 'none'}`);
 
     if (!activationKey || !fcmToken) {
       return res.status(400).json({
@@ -38,25 +38,34 @@ router.post('/activate', async (req, res) => {
     // Find if a device record was pre-created for this activation key
     let device = await Device.findOne({ activationKey: activationKey.toUpperCase() });
 
-    if (device && device.imei && device.imei !== 'unknown' && device.imei !== imei) {
-      return res.status(400).json({
-        success: false,
-        message: 'This activation key has already been bound to another device.',
-      });
+    // Check if key was ALREADY bound and activated by a DIFFERENT physical phone
+    if (device && keyRecord.isUsed && keyRecord.status === 'activated') {
+      const isSamePhoneByDrm = drmDeviceId && device.drmDeviceId && device.drmDeviceId === drmDeviceId;
+      const isSamePhoneByImei = imei && imei !== 'unknown' && device.imei && device.imei === imei;
+
+      // If it's NOT the same physical phone (neither DRM ID nor IMEI match), block re-activation!
+      if (!isSamePhoneByDrm && !isSamePhoneByImei && device.fcmToken && device.fcmToken !== fcmToken) {
+        return res.status(400).json({
+          success: false,
+          message: 'This activation key has already been activated on another device.',
+        });
+      }
+      console.log(`🔄 Re-activating same physical device (deviceId=${device.deviceId}, DRM match=${!!isSamePhoneByDrm}, IMEI match=${!!isSamePhoneByImei})`);
     }
 
     const shopkeeper = await Shopkeeper.findById(keyRecord.shopkeeperId);
 
     if (device) {
-      // Update the pre-created device with hardware details
-      device.imei = imei || device.imei || 'unknown';
+      // Update the pre-created device with actual phone hardware details & device identifier
+      if (imei && imei !== 'unknown') device.imei = imei;
+      if (drmDeviceId && drmDeviceId !== 'unknown') device.drmDeviceId = drmDeviceId;
       device.fcmToken = fcmToken;
       device.osVersion = androidVersion || device.osVersion || 'unknown';
       if (deviceModel) device.deviceModel = deviceModel;
       device.isDeviceOwner = true;
       device.isOnline = true;
       device.lastSeen = new Date();
-      device.registeredAt = new Date();
+      if (!device.registeredAt) device.registeredAt = new Date();
       await device.save();
     } else {
       // Fallback: If no pre-created device record exists, create one directly (safeguard)
@@ -69,6 +78,7 @@ router.post('/activate', async (req, res) => {
         customerName: 'Customer',
         customerMobile: '',
         imei: imei || 'unknown',
+        drmDeviceId: drmDeviceId || '',
         fcmToken,
         deviceModel: deviceModel || 'unknown',
         osVersion: androidVersion || 'unknown',
@@ -233,6 +243,7 @@ router.post('/info', async (req, res) => {
       batteryLevel,
       storageAvailable,
       ramAvailable,
+      drmDeviceId,
     } = req.body;
 
     if (!deviceId) {
@@ -247,6 +258,7 @@ router.post('/info', async (req, res) => {
     };
 
     if (imei) updateFields.imei = imei;
+    if (drmDeviceId) updateFields.drmDeviceId = drmDeviceId;
     if (deviceModel) updateFields.deviceModel = deviceModel;
     if (androidVersion) updateFields.osVersion = androidVersion;
     if (appVersion) updateFields.appVersion = appVersion;

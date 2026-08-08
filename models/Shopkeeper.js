@@ -146,6 +146,10 @@ shopkeeperSchema.methods.toJSON = function () {
   const obj = this.toObject();
   delete obj.password;
   obj.profilePic = obj.profilePicUrl || '';
+  if ((!obj.androidCredits && !obj.iosCredits) && (obj.credits || 0) > 0) {
+    obj.androidCredits = obj.credits;
+    obj.iosCredits = 0;
+  }
   return obj;
 };
 

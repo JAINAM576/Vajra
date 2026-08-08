@@ -109,9 +109,10 @@ router.get('/', async (req, res) => {
     // Base filter: exclude soft-deleted devices
     const baseFilter = { isDeleted: { $ne: true } };
 
-    // Scope to shopkeeper's own devices
+    // Scope to shopkeeper's own devices and exclude shopkeeper-deleted devices
     if (req.user.role === 'shopkeeper') {
       baseFilter.shopkeeperId = req.user.id;
+      baseFilter.isDeletedByShopkeeper = { $ne: true };
     }
 
     // Search filter — applied to both stats query and list query
@@ -586,9 +587,33 @@ router.delete('/:deviceId', async (req, res) => {
       ? { $or: [{ deviceId: req.params.deviceId }, { _id: req.params.deviceId }] }
       : { deviceId: req.params.deviceId };
 
-    // Shopkeepers can only delete their own devices
+    // Shopkeepers soft-delete by hiding from their dashboard (remains visible to admins)
     if (req.user.role === 'shopkeeper') {
       filter.shopkeeperId = req.user.id;
+      const device = await Device.findOneAndUpdate(
+        filter,
+        {
+          $set: {
+            isDeletedByShopkeeper: true,
+            deactivatedAt: Date.now(),
+          },
+        },
+        { new: true }
+      );
+
+      if (!device) {
+        return res.status(404).json({
+          success: false,
+          message: 'Device not found or does not belong to you.',
+          data: {},
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Device hidden from shopkeeper dashboard.',
+        data: {},
+      });
     }
 
     const device = await Device.findOneAndUpdate(

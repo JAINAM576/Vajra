@@ -62,6 +62,11 @@ const deviceSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    drmDeviceId: {
+      type: String,
+      trim: true,
+      default: '',
+    },
     fcmToken: {
       type: String,
     },
@@ -166,6 +171,10 @@ const deviceSchema = new mongoose.Schema(
       default: true,
     },
     isDeleted: {
+      type: Boolean,
+      default: false,
+    },
+    isDeletedByShopkeeper: {
       type: Boolean,
       default: false,
     },
