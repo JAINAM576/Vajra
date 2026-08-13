@@ -12,6 +12,7 @@ const router = express.Router();
 
 const CommandLog = require('../models/CommandLog');
 const Device = require('../models/Device');
+const ActivationKey = require('../models/ActivationKey');
 const Ticket = require('../models/Ticket');
 const Shopkeeper = require('../models/Shopkeeper');
 const crypto = require('crypto');
@@ -59,17 +60,30 @@ const applyTagToDevice = async (deviceId, commandId, inputValue) => {
   const device = await Device.findOne(query);
   if (!device) return;
 
-  const tags = device.appliedTags || {};
-
-  if (mapping.remove) {
-    delete tags[mapping.tag];
-  } else if (mapping.hasValue) {
-    tags[mapping.tag] = { value: inputValue || true };
-  } else {
-    tags[mapping.tag] = mapping.value;
+  if (!device.appliedTags) {
+    device.appliedTags = new Map();
   }
 
-  device.appliedTags = tags;
+  if (device.appliedTags instanceof Map) {
+    if (mapping.remove) {
+      device.appliedTags.delete(mapping.tag);
+    } else if (mapping.hasValue) {
+      device.appliedTags.set(mapping.tag, { value: inputValue || true });
+    } else {
+      device.appliedTags.set(mapping.tag, mapping.value ?? true);
+    }
+  } else {
+    const tags = { ...(device.appliedTags || {}) };
+    if (mapping.remove) {
+      delete tags[mapping.tag];
+    } else if (mapping.hasValue) {
+      tags[mapping.tag] = { value: inputValue || true };
+    } else {
+      tags[mapping.tag] = mapping.value ?? true;
+    }
+    device.appliedTags = tags;
+  }
+
   device.markModified('appliedTags');
   await device.save();
 };
@@ -582,7 +596,7 @@ router.put('/:logId/status', async (req, res) => {
           commandLog.commandType === 'TERMINATE_OWNER_PERMISSION' ||
           commandLog.commandId === 'terminate_owner'
         ) {
-          await Device.findByIdAndUpdate(commandLog.deviceId, {
+          const targetDev = await Device.findByIdAndUpdate(commandLog.deviceId, {
             $set: {
               isCompleted: true,
               status: 'Completed',
@@ -590,7 +604,13 @@ router.put('/:logId/status', async (req, res) => {
               deactivatedAt: new Date(),
               appliedTags: {}
             }
-          });
+          }, { new: true });
+          if (targetDev && targetDev.activationKey) {
+            await ActivationKey.updateOne(
+              { key: targetDev.activationKey.toUpperCase() },
+              { $set: { status: 'completed' } }
+            );
+          }
           console.log(`✅ Device ${commandLog.deviceId} marked as Completed following release termination.`);
         }
       } catch (tagErr) {

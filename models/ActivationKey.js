@@ -36,7 +36,7 @@ const activationKeySchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ['pending', 'activated', 'revoked', 'expired'],
+      enum: ['pending', 'activated', 'completed', 'revoked', 'expired'],
       default: 'pending',
     },
     activatedAt: {

@@ -563,6 +563,13 @@ router.put('/:deviceId', async (req, res) => {
       });
     }
 
+    if ((device.isCompleted || device.status === 'Completed') && device.activationKey) {
+      await ActivationKey.updateOne(
+        { key: device.activationKey.toUpperCase() },
+        { $set: { status: 'completed' } }
+      );
+    }
+
     return res.status(200).json({
       success: true,
       message: 'Device updated successfully.',

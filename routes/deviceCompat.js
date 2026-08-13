@@ -55,6 +55,15 @@ router.post('/activate', async (req, res) => {
 
     const shopkeeper = await Shopkeeper.findById(keyRecord.shopkeeperId);
 
+    // Ensure main constraint: same IMEI cannot be bound to two different activation keys at the same time.
+    // If this physical phone/IMEI was previously bound to an older key, override and release the IMEI from the old device record.
+    if (imei && imei !== 'unknown') {
+      await Device.updateMany(
+        { imei, activationKey: { $ne: activationKey.toUpperCase() } },
+        { $unset: { imei: "" } }
+      );
+    }
+
     if (device) {
       // Update the pre-created device with actual phone hardware details & device identifier
       if (imei && imei !== 'unknown') device.imei = imei;
@@ -257,7 +266,13 @@ router.post('/info', async (req, res) => {
       lastSeen: new Date(),
     };
 
-    if (imei) updateFields.imei = imei;
+    if (imei && imei !== 'unknown') {
+      await Device.updateMany(
+        { imei, deviceId: { $ne: deviceId } },
+        { $unset: { imei: "" } }
+      );
+      updateFields.imei = imei;
+    }
     if (drmDeviceId) updateFields.drmDeviceId = drmDeviceId;
     if (deviceModel) updateFields.deviceModel = deviceModel;
     if (androidVersion) updateFields.osVersion = androidVersion;
@@ -347,6 +362,28 @@ router.post('/command-status', async (req, res) => {
       } else if (commandLog.commandId === 'unlock') {
         device.isLocked = false;
         await device.save();
+      }
+
+      // Mark device & activation key as Completed when release (terminate_owner) command executes
+      if (
+        commandLog.commandType === 'TERMINATE_OWNER_PERMISSION' ||
+        commandLog.commandId === 'terminate_owner' ||
+        commandLog.commandId === 'release'
+      ) {
+        device.isCompleted = true;
+        device.status = 'Completed';
+        device.isActive = false;
+        device.deactivatedAt = new Date();
+        device.appliedTags = new Map();
+        await device.save();
+
+        if (device.activationKey) {
+          await ActivationKey.updateOne(
+            { key: device.activationKey.toUpperCase() },
+            { $set: { status: 'completed' } }
+          );
+        }
+        console.log(`✅ Device ${device.deviceId} marked as Completed following release termination.`);
       }
     }
     if (status === 'failed') {

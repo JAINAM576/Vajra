@@ -10,6 +10,7 @@ const express = require('express');
 const router = express.Router();
 
 const ActivationKey = require('../models/ActivationKey');
+const Device = require('../models/Device');
 const { authenticate, authorizeAdmin, authorizeShopkeeper } = require('../middleware/auth');
 const { generateActivationKey } = require('../utils/helpers');
 
@@ -38,10 +39,29 @@ router.get('/', async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
+    // Fetch device status map to mark keys as 'completed' when device is completed
+    const deviceFilter = { isDeleted: { $ne: true } };
+    if (req.user.role === 'shopkeeper') {
+      deviceFilter.shopkeeperId = req.user.id;
+    }
+    const devices = await Device.find(deviceFilter).select('activationKey isCompleted status deviceId').lean();
+    const completedKeySet = new Set(
+      devices
+        .filter((d) => d.isCompleted || d.status === 'Completed')
+        .map((d) => (d.activationKey || '').toUpperCase())
+    );
+
+    const updatedKeys = keys.map((k) => {
+      if (completedKeySet.has((k.key || '').toUpperCase())) {
+        return { ...k, status: 'completed' };
+      }
+      return k;
+    });
+
     return res.status(200).json({
       success: true,
       message: 'Activation keys retrieved successfully.',
-      data: { keys, count: keys.length },
+      data: { keys: updatedKeys, count: updatedKeys.length },
     });
   } catch (error) {
     console.error('List keys error:', error.message);
