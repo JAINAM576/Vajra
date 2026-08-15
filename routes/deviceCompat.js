@@ -68,6 +68,10 @@ router.post('/activate', async (req, res) => {
       // Update the pre-created device with actual phone hardware details & device identifier
       if (imei && imei !== 'unknown') device.imei = imei;
       if (drmDeviceId && drmDeviceId !== 'unknown') device.drmDeviceId = drmDeviceId;
+      if (!device.releaseCode) {
+        const { generateReleaseCode } = require('../utils/helpers');
+        device.releaseCode = generateReleaseCode();
+      }
       device.fcmToken = fcmToken;
       device.osVersion = androidVersion || device.osVersion || 'unknown';
       if (deviceModel) device.deviceModel = deviceModel;
@@ -78,10 +82,12 @@ router.post('/activate', async (req, res) => {
       await device.save();
     } else {
       // Fallback: If no pre-created device record exists, create one directly (safeguard)
-      const { generateDeviceId } = require('../utils/helpers');
+      const { generateDeviceId, generateReleaseCode } = require('../utils/helpers');
       const deviceId = generateDeviceId();
+      const releaseCode = generateReleaseCode();
       device = await Device.create({
         deviceId,
+        releaseCode,
         activationKey: activationKey.toUpperCase(),
         shopkeeperId: keyRecord.shopkeeperId,
         customerName: 'Customer',
@@ -431,6 +437,104 @@ router.post('/command-status', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Server error updating command status.',
+    });
+  }
+});
+
+// ─── POST /api/device/verify-release-code — Verify release code & trigger teardown ───
+router.post('/verify-release-code', async (req, res) => {
+  try {
+    const { deviceId, releaseCode } = req.body;
+
+    console.log(`\n🔑 Verification request for release code: deviceId=${deviceId}, code=${releaseCode}`);
+
+    if (!deviceId || !releaseCode) {
+      return res.status(400).json({
+        success: false,
+        message: 'deviceId and releaseCode are required.',
+      });
+    }
+
+    const cleanCode = releaseCode.trim().toUpperCase();
+
+    // Query by custom deviceId string field first.
+    // Only fall back to _id if deviceId looks like a valid ObjectId (24-char hex).
+    let device = await Device.findOne({ deviceId });
+    if (!device && /^[a-f\d]{24}$/i.test(deviceId)) {
+      device = await Device.findById(deviceId);
+    }
+
+    if (!device) {
+      return res.status(404).json({
+        success: false,
+        message: 'Device record not found.',
+      });
+    }
+
+    // Auto-generate release code if device was created before this feature
+    if (!device.releaseCode) {
+      const { generateReleaseCode } = require('../utils/helpers');
+      device.releaseCode = generateReleaseCode();
+      await device.save();
+    }
+
+    // Verify code
+    if (device.releaseCode.trim().toUpperCase() !== cleanCode) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid release code. Please check and try again.',
+      });
+    }
+
+    // Release code verified! Mark device as Completed
+    device.isCompleted = true;
+    device.status = 'Completed';
+    device.isActive = false;
+    device.deactivatedAt = new Date();
+    device.appliedTags = new Map();
+    await device.save();
+
+    if (device.activationKey) {
+      await ActivationKey.updateOne(
+        { key: device.activationKey.toUpperCase() },
+        { $set: { status: 'completed' } }
+      );
+    }
+
+    // Log release command execution
+    // CommandLog.deviceId is an ObjectId ref, so we use device._id (not device.deviceId string)
+    try {
+      await CommandLog.create({
+        deviceId: device._id,
+        shopkeeperId: device.shopkeeperId,
+        commandType: 'TERMINATE_OWNER_PERMISSION',
+        commandId: 'release',
+        commandLabel: 'Release Application',
+        category: 'actions',
+        status: 'executed',
+        executedAt: new Date(),
+        mode: 'online',
+      });
+    } catch (logErr) {
+      // Don't fail the release if only the log entry fails
+      console.warn('CommandLog write skipped:', logErr.message);
+    }
+
+    console.log(`✅ Release code verified! Device ${device.deviceId} marked as Completed.`);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Release code verified successfully! Device application released.',
+      data: {
+        isCompleted: true,
+        status: 'Completed',
+      },
+    });
+  } catch (error) {
+    console.error('Verify release code error:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error verifying release code.',
     });
   }
 });

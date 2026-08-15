@@ -20,12 +20,31 @@ router.use(authenticate, authorizeShopkeeper);
 // ─── GET / — Get own profile ─────────────────────────────────────────
 router.get('/', async (req, res) => {
   try {
-    const shopkeeper = await Shopkeeper.findById(req.user.id).select('-password');
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid session. Please login again.',
+        data: {},
+      });
+    }
+
+    let shopkeeper = req.user.doc;
+    if (!shopkeeper) {
+      try {
+        shopkeeper = await Shopkeeper.findById(req.user.id).select('-password');
+      } catch (castErr) {
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid session ID. Please login again.',
+          data: {},
+        });
+      }
+    }
 
     if (!shopkeeper) {
-      return res.status(404).json({
+      return res.status(401).json({
         success: false,
-        message: 'Profile not found.',
+        message: 'Profile not found. Please login again.',
         data: {},
       });
     }
@@ -36,7 +55,7 @@ router.get('/', async (req, res) => {
       data: { shopkeeper },
     });
   } catch (error) {
-    console.error('Get profile error:', error.message);
+    console.error('Get profile error:', error.stack || error.message);
     return res.status(500).json({
       success: false,
       message: 'Server error fetching profile.',

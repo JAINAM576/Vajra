@@ -111,7 +111,12 @@ router.get('/', async (req, res) => {
 
     // Scope to shopkeeper's own devices and exclude shopkeeper-deleted devices
     if (req.user.role === 'shopkeeper') {
-      baseFilter.shopkeeperId = req.user.id;
+      const mongoose = require('mongoose');
+      const shopkeeperObjectId = mongoose.Types.ObjectId.isValid(req.user.id)
+        ? new mongoose.Types.ObjectId(req.user.id)
+        : req.user.id;
+
+      baseFilter.shopkeeperId = { $in: [req.user.id, shopkeeperObjectId] };
       baseFilter.isDeletedByShopkeeper = { $ne: true };
     }
 
@@ -432,9 +437,12 @@ router.post('/activate', authorizeShopkeeper, validate(activateDeviceSchema), as
     const balanceIosAfter = shopkeeper.iosCredits;
 
     // Step 4: Create device
+    const { generateReleaseCode } = require('../utils/helpers');
     const deviceId = generateDeviceId();
+    const releaseCode = generateReleaseCode();
     const device = await Device.create({
       deviceId,
+      releaseCode,
       activationKey: key,
       activationKeyId: activationKey._id,
       shopkeeperId: req.user.id,
