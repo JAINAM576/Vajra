@@ -529,6 +529,8 @@ router.put('/:deviceId', async (req, res) => {
       'imei',
       'imei1',
       'imei2',
+      'customAdminMobile',
+      'osVersion',
     ];
     const updates = {};
 

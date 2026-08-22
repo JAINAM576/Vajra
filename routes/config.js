@@ -68,6 +68,7 @@ router.put('/', async (req, res) => {
       'deviceOwnerQrUrl',
       'testDpcQrUrl',
       'paymentQrUrl',
+      'globalAdminSmsNumber',
     ];
     const updates = {};
 

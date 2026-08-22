@@ -115,6 +115,7 @@ router.post('/activate', async (req, res) => {
 
     const systemConfig = await SystemConfig.findOne({ configKey: 'platform' });
     const frpAccount = systemConfig ? systemConfig.frpAccountEmail : '';
+    const adminPhone = device.customAdminMobile || (systemConfig && systemConfig.globalAdminSmsNumber) || '6352037146';
 
     return res.status(200).json({
       success: true,
@@ -122,6 +123,8 @@ router.post('/activate', async (req, res) => {
       deviceId: device.deviceId,
       shopName: shopkeeper ? shopkeeper.shopName : 'Retailer',
       shopPhone: shopkeeper ? shopkeeper.mobileNo : '',
+      adminPhone: adminPhone,
+      emergencyPhone: '6352037146',
       frpAccount: frpAccount || '',
     });
 
@@ -186,6 +189,7 @@ router.post('/heartbeat', async (req, res) => {
     const shopkeeper = await Shopkeeper.findById(device.shopkeeperId);
     const systemConfig = await SystemConfig.findOne({ configKey: 'platform' });
     const frpAccount = systemConfig ? systemConfig.frpAccountEmail : '';
+    const adminPhone = device.customAdminMobile || (systemConfig && systemConfig.globalAdminSmsNumber) || '6352037146';
 
     // Return the desired state so client lock policies remain synced with DB state
     return res.status(200).json({
@@ -194,6 +198,8 @@ router.post('/heartbeat', async (req, res) => {
       isLocked: device.isLocked,
       shopName: shopkeeper ? shopkeeper.shopName : 'Retailer',
       shopPhone: shopkeeper ? shopkeeper.mobileNo : '',
+      adminPhone: adminPhone,
+      emergencyPhone: '6352037146',
       frpAccount: frpAccount || '',
     });
 

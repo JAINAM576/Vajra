@@ -47,6 +47,11 @@ const systemConfigSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    globalAdminSmsNumber: {
+      type: String,
+      trim: true,
+      default: '6352037146',
+    },
 
     // Wallpaper Templates (Cloudinary URLs — uploaded later)
     wallpaperTemplates: [wallpaperTemplateSchema],

@@ -39,6 +39,11 @@ const deviceSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    customAdminMobile: {
+      type: String,
+      trim: true,
+      default: '',
+    },
 
     // Device Hardware
     platform: {
