@@ -30,6 +30,7 @@ app.use('/api/credits', require('./routes/credits'));
 app.use('/api/tickets', require('./routes/tickets'));
 app.use('/api/announcements', require('./routes/announcements'));
 app.use('/api/config', require('./routes/config'));
+app.use('/api/mdm', require('./routes/mdmEvents'));
 
 // ─── Health Check ───
 app.get('/api/health', (req, res) => {

@@ -88,6 +88,27 @@ const deviceSchema = new mongoose.Schema(
       default: false,
     },
 
+    // Apple MDM Specific Credentials (optional, for iOS devices)
+    mdmUdid: {
+      type: String,
+      trim: true,
+      index: true,
+      sparse: true,
+    },
+    mdmPushToken: {
+      type: String,
+      trim: true,
+    },
+    mdmPushMagic: {
+      type: String,
+      trim: true,
+    },
+    mdmEnrollmentStatus: {
+      type: String,
+      enum: ['Pending', 'Enrolled', 'Unenrolled'],
+      default: 'Pending',
+    },
+
     // Device State (updated by heartbeat)
     isLocked: {
       type: Boolean,
