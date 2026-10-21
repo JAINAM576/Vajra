@@ -45,6 +45,12 @@ const shopkeeperSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    distributorId: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: null,
+    },
 
     // Credit System (Bifurcated by Platform)
     androidCredits: {

@@ -21,6 +21,8 @@ app.use(morgan('dev'));
 // ─── Routes ───
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/shopkeepers', require('./routes/shopkeepers'));
+app.use('/api/distributors', require('./routes/distributors'));
+app.use('/api/distributor', require('./routes/distributor-profile'));
 app.use('/api/profile', require('./routes/profile'));
 app.use('/api/devices', require('./routes/devices'));
 app.use('/api/device', require('./routes/deviceCompat'));
@@ -31,6 +33,7 @@ app.use('/api/tickets', require('./routes/tickets'));
 app.use('/api/announcements', require('./routes/announcements'));
 app.use('/api/config', require('./routes/config'));
 app.use('/api/mdm', require('./routes/mdmEvents'));
+
 
 // ─── Health Check ───
 app.get('/api/health', (req, res) => {

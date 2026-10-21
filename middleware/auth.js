@@ -5,6 +5,7 @@
 const jwt = require('jsonwebtoken');
 const Admin = require('../models/Admin');
 const Shopkeeper = require('../models/Shopkeeper');
+const Distributor = require('../models/Distributor');
 
 /**
  * authenticate — Verify JWT from Authorization header and attach user to req.
@@ -52,6 +53,22 @@ const authenticate = async (req, res, next) => {
           data: {},
         });
       }
+    } else if (decoded.role === 'distributor') {
+      user = await Distributor.findById(decoded.id).select('-password');
+      if (!user) {
+        return res.status(401).json({
+          success: false,
+          message: 'Distributor account not found.',
+          data: {},
+        });
+      }
+      if (!user.isActive) {
+        return res.status(403).json({
+          success: false,
+          message: 'Distributor account is deactivated.',
+          data: {},
+        });
+      }
     } else if (decoded.role === 'shopkeeper') {
       user = await Shopkeeper.findById(decoded.id).select('-password');
       if (!user) {
@@ -85,6 +102,7 @@ const authenticate = async (req, res, next) => {
 
     req.user = {
       id: user._id,
+      distributorId: user.distributorId || null,
       role: decoded.role,
       doc: user, // full document for convenience
     };
@@ -110,6 +128,20 @@ const authorizeAdmin = (req, res, next) => {
   return res.status(403).json({
     success: false,
     message: 'Access denied. Admin privileges required.',
+    data: {},
+  });
+};
+
+/**
+ * authorizeDistributor — Allow only distributor role.
+ */
+const authorizeDistributor = (req, res, next) => {
+  if (req.user.role === 'distributor') {
+    return next();
+  }
+  return res.status(403).json({
+    success: false,
+    message: 'Access denied. Distributor privileges required.',
     data: {},
   });
 };
@@ -144,4 +176,5 @@ const authorizeRoles = (...allowedRoles) => {
   };
 };
 
-module.exports = { authenticate, authorizeAdmin, authorizeShopkeeper, authorizeRoles };
+module.exports = { authenticate, authorizeAdmin, authorizeDistributor, authorizeShopkeeper, authorizeRoles };
+

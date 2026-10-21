@@ -14,12 +14,18 @@ const sendEmail = require('../utils/email');
 
 const Admin = require('../models/Admin');
 const Shopkeeper = require('../models/Shopkeeper');
+const Distributor = require('../models/Distributor');
 const validate = require('../middleware/validator');
 
 // --- Validation Schemas ---
 const loginAdminSchema = {
   adminId: { required: true, requiredMessage: 'Admin ID and password are required.' },
   password: { required: true, requiredMessage: 'Admin ID and password are required.' }
+};
+
+const loginDistributorSchema = {
+  distributorId: { required: true, requiredMessage: 'Distributor ID and password are required.' },
+  password: { required: true, requiredMessage: 'Distributor ID and password are required.' }
 };
 
 const registerShopkeeperSchema = {
@@ -135,6 +141,61 @@ router.post('/admin/login', validate(loginAdminSchema), async (req, res) => {
   }
 });
 
+// ─── POST /distributor/login ──────────────────────────────────────────
+router.post('/distributor/login', validate(loginDistributorSchema), async (req, res) => {
+  try {
+    const { distributorId, password } = req.body;
+    const formattedId = (distributorId || '').trim().toUpperCase();
+
+    const distributor = await Distributor.findOne({ distributorId: formattedId });
+    if (!distributor) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid Distributor ID or password.',
+        data: {},
+      });
+    }
+
+    if (!distributor.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: 'Distributor account is deactivated. Contact super admin.',
+        data: {},
+      });
+    }
+
+    const isMatch = await distributor.comparePassword(password);
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid Distributor ID or password.',
+        data: {},
+      });
+    }
+
+    distributor.lastLoginAt = new Date();
+    await distributor.save();
+
+    const token = signToken({ id: distributor._id, role: 'distributor' });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Distributor login successful.',
+      data: {
+        token,
+        distributor: distributor.toJSON(),
+      },
+    });
+  } catch (error) {
+    console.error('Distributor login error:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error during distributor login.',
+      data: {},
+    });
+  }
+});
+
 // ─── POST /shopkeeper/register ───────────────────────────────────────
 router.post('/shopkeeper/register', validate(registerShopkeeperSchema), async (req, res) => {
   try {
@@ -146,6 +207,7 @@ router.post('/shopkeeper/register', validate(registerShopkeeperSchema), async (r
       password,
       aadhaarNo,
       gmail,
+      distributorId,
     } = req.body;
 
     // Check duplicate mobile
@@ -156,6 +218,28 @@ router.post('/shopkeeper/register', validate(registerShopkeeperSchema), async (r
         message: 'Mobile number is already registered.',
         data: {},
       });
+    }
+
+    let linkedDistributorId = null;
+    if (distributorId && distributorId.trim()) {
+      const formattedCode = distributorId.trim().toUpperCase();
+      if (!/^[A-Z]{3}\d{3}$/.test(formattedCode)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Distributor ID must be 6 characters (3 letters followed by 3 numbers, e.g. DIS101).',
+          data: {},
+        });
+      }
+
+      const dist = await Distributor.findOne({ distributorId: formattedCode, isActive: true });
+      if (!dist) {
+        return res.status(400).json({
+          success: false,
+          message: `Distributor with ID "${formattedCode}" not found or inactive.`,
+          data: {},
+        });
+      }
+      linkedDistributorId = formattedCode;
     }
 
     // Create default assets
@@ -171,7 +255,9 @@ router.post('/shopkeeper/register', validate(registerShopkeeperSchema), async (r
       password,
       profilePicUrl: profilePic,
       wallpaperUrl: defaultWallpaper,
+      distributorId: linkedDistributorId,
     };
+
     if (aadhaarNo && aadhaarNo.trim()) {
       createData.aadhaarNo = aadhaarNo.trim();
     }

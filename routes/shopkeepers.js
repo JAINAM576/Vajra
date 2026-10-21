@@ -16,18 +16,34 @@ const Device = require('../models/Device');
 const ActivationKey = require('../models/ActivationKey');
 const CommandLog = require('../models/CommandLog');
 const CreditTransaction = require('../models/CreditTransaction');
-const { authenticate, authorizeAdmin } = require('../middleware/auth');
+const Distributor = require('../models/Distributor');
+const { authenticate, authorizeRoles, authorizeAdmin } = require('../middleware/auth');
 const { generateAndUploadWallpaper } = require('../utils/wallpaper');
 
-// All routes require admin auth
-router.use(authenticate, authorizeAdmin);
+// Authenticate all routes for admin or distributor
+router.use(authenticate, authorizeRoles('super_admin', 'support_admin', 'distributor'));
 
 // ─── GET / — List all shopkeepers ────────────────────────────────────
 router.get('/', async (req, res) => {
   try {
-    const { search, active } = req.query;
+    const { search, active, distributorId } = req.query;
 
     const filter = { isDeleted: { $ne: true } };
+
+    // Role-based scoping: Distributor callers ONLY see shopkeepers registered under them
+    if (req.user.role === 'distributor') {
+      if (!req.user.distributorId) {
+        return res.status(200).json({
+          success: true,
+          message: 'Shopkeepers retrieved successfully.',
+          data: { shopkeepers: [], count: 0 },
+        });
+      }
+      filter.distributorId = req.user.distributorId;
+    } else if (distributorId && distributorId.trim()) {
+      // Super Admin filtering by specific distributorId
+      filter.distributorId = distributorId.trim().toUpperCase();
+    }
 
     // Search by name or shop name
     if (search) {
@@ -72,6 +88,7 @@ router.get('/', async (req, res) => {
     });
   }
 });
+
 
 // ─── GET /:id — Get single shopkeeper ────────────────────────────────
 router.get('/:id', async (req, res) => {
@@ -197,6 +214,38 @@ router.put('/:id/credits', async (req, res) => {
       });
     }
 
+    let distributorDoc = null;
+
+    // Distributor scoping & balance checks
+    if (req.user.role === 'distributor') {
+      if (shopkeeper.distributorId !== req.user.distributorId) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied. This shopkeeper is not registered under your distributor account.',
+          data: {},
+        });
+      }
+
+      distributorDoc = await Distributor.findById(req.user.id);
+      if (!distributorDoc) {
+        return res.status(404).json({
+          success: false,
+          message: 'Distributor account not found.',
+          data: {},
+        });
+      }
+
+      // Check distributor has enough credits if adding
+      const distPlatformCredits = targetPlatform === 'ios' ? (distributorDoc.iosCredits || 0) : (distributorDoc.androidCredits || 0);
+      if (amount > 0 && distPlatformCredits < amount) {
+        return res.status(400).json({
+          success: false,
+          message: `Insufficient distributor ${targetPlatform} credits. You have ${distPlatformCredits} ${targetPlatform} credits remaining.`,
+          data: {},
+        });
+      }
+    }
+
     const balanceBefore = shopkeeper.credits || 0;
     const balanceAndroidBefore = shopkeeper.androidCredits || 0;
     const balanceIosBefore = shopkeeper.iosCredits || 0;
@@ -212,6 +261,19 @@ router.put('/:id/credits', async (req, res) => {
     // Keep legacy credits field in sync
     shopkeeper.credits = (shopkeeper.androidCredits || 0) + (shopkeeper.iosCredits || 0);
     await shopkeeper.save();
+
+    // Deduct/Add back from distributor balance
+    if (distributorDoc) {
+      if (targetPlatform === 'ios') {
+        distributorDoc.iosCredits = (distributorDoc.iosCredits || 0) - amount;
+        if (distributorDoc.iosCredits < 0) distributorDoc.iosCredits = 0;
+      } else {
+        distributorDoc.androidCredits = (distributorDoc.androidCredits || 0) - amount;
+        if (distributorDoc.androidCredits < 0) distributorDoc.androidCredits = 0;
+      }
+      distributorDoc.credits = (distributorDoc.androidCredits || 0) + (distributorDoc.iosCredits || 0);
+      await distributorDoc.save();
+    }
 
     const balanceAfter = shopkeeper.credits;
     const balanceAndroidAfter = shopkeeper.androidCredits;
@@ -233,9 +295,9 @@ router.put('/:id/credits', async (req, res) => {
       balanceAndroidAfter,
       balanceIosBefore,
       balanceIosAfter,
-      paymentMethod: paymentMethod || 'manual',
+      paymentMethod: paymentMethod || (req.user.role === 'distributor' ? 'distributor_transfer' : 'manual'),
       paymentReference: paymentReference || '',
-      notes: notes || '',
+      notes: notes || (req.user.role === 'distributor' ? `Transferred by Distributor ${req.user.distributorId}` : ''),
       approvedBy: req.user.id,
     });
 
@@ -246,9 +308,11 @@ router.put('/:id/credits', async (req, res) => {
         credits: balanceAfter,
         androidCredits: balanceAndroidAfter,
         iosCredits: balanceIosAfter,
+        distributorCreditsRemaining: distributorDoc ? distributorDoc.credits : undefined,
         transaction,
       },
     });
+
   } catch (error) {
     console.error('Add credits error:', error.message);
     return res.status(500).json({
