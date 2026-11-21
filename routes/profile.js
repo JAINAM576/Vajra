@@ -1,16 +1,19 @@
 /**
  * Vajra Lock App — Shopkeeper Profile Routes (Shopkeeper Only)
- * GET  /               — Get own profile
- * PUT  /               — Update own profile
- * PUT  /wallpaper      — Update wallpaper URL
- * PUT  /notifications  — Update notification settings
- * PUT  /password       — Change own password
+ * GET    /               — Get own profile
+ * PUT    /               — Update own profile
+ * PUT    /wallpaper      — Update wallpaper URL
+ * PUT    /notifications  — Update notification settings
+ * PUT    /password       — Change own password
+ * DELETE /account        — Permanently delete own account
  */
 
 const express = require('express');
 const router = express.Router();
 
 const Shopkeeper = require('../models/Shopkeeper');
+const Device = require('../models/Device');
+const ActivationKey = require('../models/ActivationKey');
 const { authenticate, authorizeShopkeeper } = require('../middleware/auth');
 const { generateAndUploadWallpaper } = require('../utils/wallpaper');
 
@@ -286,6 +289,74 @@ router.put('/password', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Server error changing password.',
+      data: {},
+    });
+  }
+});
+
+// ─── DELETE /account — Permanently delete own account ────────────────
+router.delete('/account', async (req, res) => {
+  try {
+    const { password } = req.body;
+
+    if (!password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password is required to confirm account deletion.',
+        data: {},
+      });
+    }
+
+    const shopkeeper = await Shopkeeper.findById(req.user.id);
+    if (!shopkeeper) {
+      return res.status(404).json({
+        success: false,
+        message: 'Account not found.',
+        data: {},
+      });
+    }
+
+    const isMatch = await shopkeeper.comparePassword(password);
+    if (!isMatch) {
+      return res.status(400).json({
+        success: false,
+        message: 'Incorrect password. Account deletion cancelled.',
+        data: {},
+      });
+    }
+
+    // 1. Soft-delete shopkeeper and scrub sensitive data
+    shopkeeper.isDeleted = true;
+    shopkeeper.isActive = false;
+    shopkeeper.password = 'ACCOUNT_DELETED';
+    shopkeeper.resetPasswordOtp = null;
+    shopkeeper.resetPasswordOtpExpires = null;
+    shopkeeper.resetPasswordOtpSentAt = null;
+    shopkeeper.smsSecretPin = null;
+    await shopkeeper.save();
+
+    // 2. Deactivate all devices owned by this shopkeeper (keep in DB for tracking)
+    await Device.updateMany(
+      { shopkeeperId: shopkeeper._id },
+      { $set: { isActive: false, status: 'ShopkeeperDeleted' } }
+    );
+
+    // 3. Revoke unused activation keys (keep used ones for audit trail)
+    await ActivationKey.updateMany(
+      { shopkeeperId: shopkeeper._id, isUsed: false },
+      { $set: { status: 'revoked', revokedAt: new Date() } }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Account deleted successfully.',
+      data: {},
+    });
+  } catch (error) {
+    console.error('Delete account error:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error during account deletion.',
       data: {},
     });
   }
